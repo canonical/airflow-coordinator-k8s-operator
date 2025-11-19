@@ -15,7 +15,7 @@ jobs:
 
       - name: Install uv and tox
         run: |
-          sudo snap install astral-uv
+          sudo snap install astral-uv --classic
           uv tool install tox
 
       - name: Run unit tests
@@ -32,7 +32,7 @@ jobs:
 
       - name: Install uv and tox
         run: |
-          sudo snap install astral-uv
+          sudo snap install astral-uv --classic
           uv tool install tox
 
       - name: Run unit tests
