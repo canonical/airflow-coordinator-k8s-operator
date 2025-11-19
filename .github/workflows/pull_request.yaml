@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  pull_request
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install uv and tox
+        run: |
+          sudo snap install astral-uv
+          uv tool install tox
+
+      - name: Run unit tests
+        run: uv tool run tox -e lint
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install uv and tox
+        run: |
+          sudo snap install astral-uv
+          uv tool install tox
+
+      - name: Run unit tests
+        run: uv tool run tox -e unit
