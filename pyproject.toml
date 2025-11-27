@@ -11,13 +11,18 @@ requires-python = ">=3.10"
 # dependencies of any charmlibs that the charm uses (copy the dependencies from PYDEPS).
 dependencies = [
     "ops>=3,<4",
+    "pydantic>=1.0",
+    "Jinja2>=3.1.6",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 # Dependencies of linting and static type checks
 lint = [
     "ruff",
     "codespell",
+]
+format = [
+    "ruff",
 ]
 # Dependencies of unit tests
 unit = [

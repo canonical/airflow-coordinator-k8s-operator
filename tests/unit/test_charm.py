@@ -53,9 +53,7 @@ def test_invalid_core_charm_airflow_version(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus(
-        "Integrated apps with invalid or mismatched versions"
-    )
+    assert state_out.app_status == ops.BlockedStatus("Integrated apps with mismatched versions")
 
 
 def test_invalid_core_charm_workload_image_hash(

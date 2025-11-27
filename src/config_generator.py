@@ -5,7 +5,7 @@
 
 import logging
 
-import ops.charm
+import ops
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class AirflowConfigGenerator:
     """Encapsulate Airflow config generation logic."""
 
-    def __init__(self, charm: ops.charm.CharmBase):
+    def __init__(self, charm: ops.CharmBase):
         self._charm = charm
 
     @property

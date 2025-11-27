@@ -8,7 +8,9 @@ import logging
 
 import ops
 
-import airflow_coordinator
+# TODO: change to official charm lib name after charmhub registration + lib is published
+from charms.airflow_coordinator_k8s.v0.airflow_coordinator_temp import AirflowCoordinatorProvides
+
 import config_generator
 from constants import AIRFLOW_COORDINATOR_RELATION_NAME
 
@@ -22,39 +24,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         super().__init__(framework)
 
         self._config_generator = config_generator.AirflowConfigGenerator(self)
-        self._provider = airflow_coordinator.AirflowCoordinatorProvides(
-            self, AIRFLOW_COORDINATOR_RELATION_NAME
-        )
+        self._provider = AirflowCoordinatorProvides(self, AIRFLOW_COORDINATOR_RELATION_NAME)
 
         self.framework.observe(self.on.start, self.reconcile)
         self.framework.observe(self.on.update_status, self.reconcile)
 
-    def create_or_update_secret(
-        self, scope: str, secret_label: str, contents: dict[str, str]
-    ) -> ops.Secret:
-        """Create or update a (app or unit) secret with the provided contents."""
-        if scope not in ["unit", "app"]:
-            raise ValueError(f"Unknown secret scope: {scope}")
-
-        if scope == "app" and not self.unit.is_leader():
-            raise RuntimeError("Attempting to set app secret in non leader unit")
-
-        try:
-            secret = self.model.get_secret(label=secret_label)
-
-            new_content = secret.get_content()
-            new_content.update(contents)
-
-            secret.set_content(new_content)
-        except ops.SecretNotFoundError:
-            if scope == "app":
-                secret = self.app.add_secret(contents, label=secret_label)
-            else:
-                secret = self.unit.add_secret(contents, label=secret_label)
-
-        return secret
-
-    def reconcile(self, event) -> None:
+    def reconcile(self, _) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
         # TODO: restrict the application to 1 unit?
         if not self.unit.is_leader():
