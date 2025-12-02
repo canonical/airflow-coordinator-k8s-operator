@@ -18,7 +18,7 @@ jobs:
           sudo snap install astral-uv --classic
           uv tool install tox
 
-      - name: Run unit tests
+      - name: Run lint
         run: uv tool run tox -e lint
 
   unit-tests:
