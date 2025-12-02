@@ -1,2 +1,3 @@
-# airflow-coordinator-k8s-operator
+# Airflow Coordinator K8s Operator
+
 A Charmed Operator for coordinating Charmed Airflow operators 
