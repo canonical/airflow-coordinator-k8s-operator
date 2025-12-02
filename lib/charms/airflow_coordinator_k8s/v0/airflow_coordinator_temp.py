@@ -6,6 +6,7 @@
 """Temporary charm lib for Airflow Coordinator."""
 
 import collections
+import json
 import logging
 import pickle
 import typing
@@ -79,13 +80,18 @@ class AirflowCoordinatorRequirerModel(data_interfaces.BaseCommonModel):
         return self
 
 
+SensitiveDataSecretStr = typing.Annotated[
+    data_interfaces.OptionalSecretStr, pydantic.Field(exclude=True, default=None), "sensitive_data"
+]
+
+
 class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
     """Provider side of the Airflow Coordinator model."""
 
     config_template: str | None = pydantic.Field(default=None)
     kubernetes_executor_pod_spec: str | None = pydantic.Field(default=None)
-    sensitive_data: dict[str, str] | None = pydantic.Field(default=None)
-    secret_id: data_interfaces.SecretString | None = pydantic.Field(default=None)
+    sensitive_data: SensitiveDataSecretStr = pydantic.Field(default=None)
+    secret_sensitive_data: data_interfaces.SecretString | None = pydantic.Field(default=None)
 
     validation_failures: list[MetadataValidationError] | None = pydantic.Field(default=[])
 
@@ -94,6 +100,8 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
         """Validates and modifies, if necessary, response to be sent from Airflow Coordinator."""
         if self.validation_failures:
             return self
+
+        self.validation_failures = None
 
         if not self.config_template:
             raise ValueError("Missing config template")
@@ -450,12 +458,12 @@ class AirflowCoordinatorProviderEventHandler(
                 model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
 
             if sensitive_data:
-                model.sensitive_data = sensitive_data
+                model.sensitive_data = json.dumps(sensitive_data)
         except pydantic.ValidationError:
             model = AirflowCoordinatorProviderModel(
                 config_template=config_template,
                 kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
-                sensitive_data=sensitive_data,
+                sensitive_data=json.dumps(sensitive_data),
             )
 
         for relation in self.interface.relations:
@@ -547,7 +555,7 @@ class AirflowCoordinatorRequires(ops.Object):
             return
 
         return jinja2.Template(provider_content.config_template).render(
-            context=provider_content.sensitive_data
+            context=json.loads(provider_content.sensitive_data)
         )
 
     @property
@@ -561,7 +569,7 @@ class AirflowCoordinatorRequires(ops.Object):
             return
 
         return jinja2.Template(provider_content.kubernetes_executor_pod_spec).render(
-            context=provider_content.sensitive_data
+            context=json.loads(provider_content.sensitive_data)
         )
 
 

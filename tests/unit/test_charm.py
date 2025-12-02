@@ -4,6 +4,8 @@
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
 import dataclasses
+import json
+import unittest.mock
 
 import ops
 import ops.testing
@@ -32,6 +34,26 @@ def test_missing_core_charm_relations(
         "Missing integrations with scheduler, triggerer"
     )
 
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "missing_component",
+                "message": "Required component is missing in the cluster",
+            },
+            {
+                "component": "triggerer",
+                "code": "missing_component",
+                "message": "Required component is missing in the cluster",
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
+
 
 def test_invalid_core_charm_airflow_version(
     context, state, all_required_relations, scheduler_data, scheduler_relation
@@ -54,6 +76,21 @@ def test_invalid_core_charm_airflow_version(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.app_status == ops.BlockedStatus("Integrated apps with mismatched versions")
+
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "inconsistent_airflow_version",
+                "message": "Component has an airflow version inconsistent with the cluster",
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
 
 
 def test_invalid_core_charm_workload_image_hash(
@@ -80,8 +117,38 @@ def test_invalid_core_charm_workload_image_hash(
         "Integrated apps with inconsistent image hashes"
     )
 
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "inconsistent_workload_image_hash",
+                "message": "Component has a workload image hash that is inconsistent with the cluster",  # noqa: E501
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {"validation-failures": failures}
+
 
 def test_happy_path(context, state):
-    state_out = context.run(context.on.start(), state)
+    with (
+        unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.config_template",
+            new_callable=unittest.mock.PropertyMock(return_value="mock_config"),
+        ),
+        unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.sensitive_config_values",
+            new_callable=unittest.mock.PropertyMock(return_value={"secret": "s3cret"}),
+        ),
+    ):
+        state_out = context.run(context.on.start(), state)
 
     assert state_out.app_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data["config-template"] == "mock_config"
+
+        state_out.get_secret(
+            id=relation.local_app_data["secret-sensitive-data"]
+        ).latest_content == {"secret": "s3cret"}
