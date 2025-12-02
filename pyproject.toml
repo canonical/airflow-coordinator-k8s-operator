@@ -15,7 +15,7 @@ dependencies = [
     "Jinja2>=3.1.6",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 # Dependencies of linting and static type checks
 lint = [
     "ruff",

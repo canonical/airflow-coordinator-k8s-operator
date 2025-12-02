@@ -24,7 +24,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         super().__init__(framework)
 
         self._config_generator = config_generator.AirflowConfigGenerator(self)
-        self._provider = AirflowCoordinatorProvides(self, AIRFLOW_COORDINATOR_RELATION_NAME)
+        self._provider = AirflowCoordinatorProvides(
+            self, AIRFLOW_COORDINATOR_RELATION_NAME, callback=self.reconcile
+        )
 
         self.framework.observe(self.on.start, self.reconcile)
         self.framework.observe(self.on.update_status, self.reconcile)
@@ -35,13 +37,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self.unit.is_leader():
             return
 
-        coordinator_relations_valid, error_message = self._provider.all_required_components_valid
-        if not coordinator_relations_valid:
+        error_message = self._provider.validate_core_components()
+        if error_message:
             self.app.status = ops.BlockedStatus(error_message)
             return
 
         self._provider.set_config(
-            self._config_generator.config_template, self._config_generator.sensitive_config_values
+            self._config_generator.config_template,
+            sensitive_data=self._config_generator.sensitive_config_values,
         )
 
         self.app.status = ops.ActiveStatus()
