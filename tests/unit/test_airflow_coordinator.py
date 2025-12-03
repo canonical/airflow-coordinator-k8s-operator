@@ -128,8 +128,8 @@ def invalid_workload_image_hash_relation_data():
 @pytest.fixture(scope="function")
 def valid_relation_data(coordinator_relation_secret):
     return {
-        "config-template": "test-config",
-        "kubernetes-pod-executor-spec": "test-pod-spec",
+        "config-template": "test-config: {{ secret }}",
+        "kubernetes-executor-pod-spec": "test-pod-spec: {{ secret }}",
         "secret-sensitive-data": coordinator_relation_secret.id,
     }
 
@@ -164,9 +164,17 @@ def application_state(
 
 
 class TestAirflowCoordinatorRequires:
-    def test_write_airflow_config(self, application_context, application_state):
-        with application_context(application_context.on.start(), application_state) as manager:
+
+    def get_juju_log_line(self, log_level: str, event: ops.EventBase):
+        return ops.testing.JujuLogLine(
+            level=log_level,
+            message=f"§Reacting to event: {event}"
+        )
+
+    def test_write_airflow_config(self, application_context, application_state, application_airflow_coordinator_relation):
+        with application_context(application_context.on.relation_changed(application_airflow_coordinator_relation), application_state) as manager:
             state_out = manager.run()
+            assert self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigAvailableEvent) in application_context.juju_log
 
             assert manager.charm.requirer.write_airflow_config("/config/path")
 
@@ -178,5 +186,20 @@ class TestAirflowCoordinatorRequires:
 
             assert config_file_path.exists()
             assert config_file_path.is_file()
-            assert config_file_path.read_text(encoding="utf-8") == "test-config"
+            assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
+            assert config_file_path.stat().st_mode & 0o777 == 0o644
+
+    def test_write_kubernetes_executor_pod_spec(self, application_context, application_state, application_airflow_coordinator_relation):
+        with application_context(application_context.on.relation_changed(application_airflow_coordinator_relation), application_state) as manager:
+            assert manager.charm.requirer.write_kubernetes_executor_pod_spec("/k8s_executor_pod_spec/path")
+
+            filesystem = application_state.get_container("workload-container").get_filesystem(
+                application_context
+            )
+
+            config_file_path = pathlib.Path(f"{filesystem.absolute()}/k8s_executor_pod_spec/path")
+
+            assert config_file_path.exists()
+            assert config_file_path.is_file()
+            assert config_file_path.read_text(encoding="utf-8") == "test-pod-spec: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644

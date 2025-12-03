@@ -95,6 +95,9 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
 
     validation_failures: list[MetadataValidationError] | None = pydantic.Field(default=[])
 
+    # hack to enable databag diff computation with data_interfaces v1 charm lib
+    request_id: str = pydantic.Field(default="fixed_request_id", exclude=True)
+
     @pydantic.model_validator(mode="after")
     def validate_fields(self):
         """Validates and modifies, if necessary, response to be sent from Airflow Coordinator."""
@@ -177,10 +180,10 @@ class AirflowCoordinatorEvent(ops.EventBase, typing.Generic[TAirflowCoordinatorM
         self.relation = relation
 
         app_name = snapshot.get("app_name")
-        self.app = self.framework.model.get(app_name) if app_name else None
+        self.app = self.framework.model.get_app(app_name) if app_name else None
 
         unit_name = snapshot.get("unit_name")
-        self.unit = self.framework.model.get(unit_name) if unit_name else None
+        self.unit = self.framework.model.get_app(unit_name) if unit_name else None
 
         self.content = pickle.loads(snapshot["content"])
 
@@ -591,7 +594,7 @@ class AirflowCoordinatorRequires(ops.Object):
             return False
 
         config = jinja2.Template(provider_content.config_template).render(
-            context=json.loads(provider_content.sensitive_data)
+            json.loads(provider_content.sensitive_data)
         )
 
         self.workload_container.push(
@@ -621,7 +624,7 @@ class AirflowCoordinatorRequires(ops.Object):
 
         k8s_executor_pod_spec = jinja2.Template(
             provider_content.kubernetes_executor_pod_spec
-        ).render(context=json.loads(provider_content.kubernetes_executor_pod_spec))
+        ).render(json.loads(provider_content.sensitive_data))
 
         self.workload_container.push(
             filepath,
