@@ -42,7 +42,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.app.status = ops.BlockedStatus(error_message)
             return
 
-        self._provider.set_config(
+        self._provider.set_airflow_config(
             self._config_generator.config_template,
             sensitive_data=self._config_generator.sensitive_config_values,
         )

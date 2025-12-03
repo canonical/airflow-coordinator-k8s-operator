@@ -320,7 +320,12 @@ class AirflowCoordinatorRequirerEventHandler(
         repository = data_interfaces.OpsRelationRepository(
             self.model, event.relation, component=event.relation.app
         )
-        content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+
+        try:
+            content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+        except pydantic.ValidationError:
+            logger.warning("Invalid relation contents from the coordinator charm")
+            return
 
         getattr(self.on, "airflow_config_updated").emit(
             relation,
@@ -342,7 +347,12 @@ class AirflowCoordinatorRequirerEventHandler(
         if not repository.get_data():
             return
 
-        content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+        try:
+            content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+        except pydantic.ValidationError:
+            logger.warning("Invalid relation contents from the coordinator charm")
+            return
+
         self._handle_event(event, repository, content)
 
     def set_metadata(self, metadata: AirflowCoordinatorRequirerModel):
@@ -357,9 +367,12 @@ class AirflowCoordinatorRequirerEventHandler(
         self.interface.write_model(relation.id, metadata)
 
     @property
-    def provider_content(self) -> AirflowCoordinatorProviderModel:
+    def provider_content(self) -> typing.Optional[AirflowCoordinatorProviderModel]:
         """Data from the related Airflow Coordinator charm."""
-        return data_interfaces.build_model(self.repository, AirflowCoordinatorProviderModel)
+        try:
+            return data_interfaces.build_model(self.repository, AirflowCoordinatorProviderModel)
+        except pydantic.ValidationError:
+            return None
 
 
 class AirflowCoordinatorProviderEventHandler(
@@ -431,7 +444,11 @@ class AirflowCoordinatorProviderEventHandler(
         if not repository.get_data():
             return
 
-        content = data_interfaces.build_model(repository, AirflowCoordinatorRequirerModel)
+        try:
+            content = data_interfaces.build_model(repository, AirflowCoordinatorRequirerModel)
+        except pydantic.ValidationError:
+            logger.warning("Invalid relation contents from a core charm")
+            return
 
         self._handle_event(event, repository, content)
 
@@ -449,7 +466,9 @@ class AirflowCoordinatorProviderEventHandler(
             return
 
         try:
-            model = self.interface.build_model(self.relation.id, AirflowCoordinatorProviderModel)
+            model = self.interface.build_model(
+                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
+            )
 
             if config_template:
                 model.config_template = config_template
@@ -488,15 +507,25 @@ class AirflowCoordinatorProviderEventHandler(
     @property
     def core_charms_metadata(self) -> dict[str, AirflowCoordinatorRequirerModel]:
         """Charm metadata from each of the related core charms."""
+
+        def _build_requirer_model(
+            relation: ops.Relation,
+        ) -> typing.Optional[AirflowCoordinatorRequirerModel]:
+            try:
+                return self.interface.build_model(
+                    relation.id, AirflowCoordinatorRequirerModel, component=relation.app
+                )
+            except pydantic.ValidationError:
+                return None
+
         return {
             metadata.component: metadata
             for metadata in [
-                self.interface.build_model(
-                    relation.id, AirflowCoordinatorRequirerModel, component=relation.app
-                )
+                _build_requirer_model(relation)
                 for relation in self.interface.relations
                 if self.interface.repository(relation.id, relation.app).get_data()
             ]
+            if metadata is not None
         }
 
 
@@ -523,8 +552,8 @@ class AirflowCoordinatorRequires(ops.Object):
         self._charm = charm
         self._relation = charm.model.get_relation(relation_name)
 
-        workload_container = charm.unit.get_container(workload_container_name)
-        if workload_container.can_connect():
+        self.workload_container = charm.unit.get_container(workload_container_name)
+        if self.workload_container.can_connect():
             # TODO: pull airflow_version and workload_image_hash from container
             airflow_version = "3.1.0"
             workload_image_hash = "somehash"
@@ -544,33 +573,58 @@ class AirflowCoordinatorRequires(ops.Object):
         )
         self.framework.observe(charm.on[relation_name].relation_broken, callback)
 
-    @property
-    def config(self) -> typing.Optional[str]:
-        """The Airflow config for the core charm to use."""
+    def write_airflow_config(self, config_path: str) -> bool:
+        """Render the Airflow config in the provided path in the workload container."""
+        if not self.workload_container.can_connect():
+            return False
+
         if not self._relation or not self._relation.active:
-            return
+            return False
 
         provider_content = self._requirer_handler.provider_content
         if not provider_content:
-            return
+            return False
 
-        return jinja2.Template(provider_content.config_template).render(
+        config = jinja2.Template(provider_content.config_template).render(
             context=json.loads(provider_content.sensitive_data)
         )
 
-    @property
-    def kubernetes_executor_pod_spec(self) -> typing.Optional[str]:
-        """The K8s executor pod spec for the core charm to use."""
+        self.workload_container.push(
+            config_path,
+            config,
+            user="root",
+            group="root",
+        )
+
+        return True
+
+    def write_kubernetes_executor_pod_spec(self, filepath: str) -> bool:
+        """Render the K8s executor pod spec in the provided path in the workload container."""
+        if not self.workload_container.can_connect():
+            return False
+
         if not self._relation or not self._relation.active:
-            return
+            return False
 
         provider_content = self._requirer_handler.provider_content
         if not provider_content:
-            return
+            return False
 
-        return jinja2.Template(provider_content.kubernetes_executor_pod_spec).render(
-            context=json.loads(provider_content.sensitive_data)
+        if not provider_content.kubernetes_executor_pod_spec:
+            return False
+
+        k8s_executor_pod_spec = jinja2.Template(
+            provider_content.kubernetes_executor_pod_spec
+        ).render(context=json.loads(provider_content.kubernetes_executor_pod_spec))
+
+        self.workload_container.push(
+            filepath,
+            k8s_executor_pod_spec,
+            user="root",
+            group="root",
         )
+
+        return True
 
 
 class AirflowCoordinatorProvides(ops.Object):
@@ -662,7 +716,7 @@ class AirflowCoordinatorProvides(ops.Object):
 
         return error_message
 
-    def set_config(
+    def set_airflow_config(
         self,
         config_template: str,
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
