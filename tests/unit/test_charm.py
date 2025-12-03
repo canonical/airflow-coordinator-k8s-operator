@@ -149,6 +149,6 @@ def test_happy_path(context, state):
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data["config-template"] == "mock_config"
 
-        state_out.get_secret(
+        assert state_out.get_secret(
             id=relation.local_app_data["secret-sensitive-data"]
-        ).latest_content == {"secret": "s3cret"}
+        ).latest_content == {"sensitive-data": json.dumps({"secret": "s3cret"})}

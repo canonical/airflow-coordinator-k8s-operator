@@ -81,7 +81,7 @@ class AirflowCoordinatorRequirerModel(data_interfaces.BaseCommonModel):
 
 
 SensitiveDataSecretStr = typing.Annotated[
-    data_interfaces.OptionalSecretStr, pydantic.Field(exclude=True, default=None), "sensitive_data"
+    data_interfaces.OptionalSecretStr, pydantic.Field(exclude=True, default=None), "sensitive-data"
 ]
 
 
@@ -91,7 +91,7 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
     config_template: str | None = pydantic.Field(default=None)
     kubernetes_executor_pod_spec: str | None = pydantic.Field(default=None)
     sensitive_data: SensitiveDataSecretStr = pydantic.Field(default=None)
-    secret_sensitive_data: data_interfaces.SecretString | None = pydantic.Field(default=None)
+    secret_sensitive_data: data_interfaces.SecretString = pydantic.Field(default=None)
 
     validation_failures: list[MetadataValidationError] | None = pydantic.Field(default=[])
 
@@ -317,12 +317,10 @@ class AirflowCoordinatorRequirerEventHandler(
 
         remote_unit = self.get_remote_unit(relation)
 
-        repository = data_interfaces.OpsRelationRepository(
-            self.model, event.relation, component=event.relation.app
-        )
-
         try:
-            content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+            content = self.interface.build_model(
+                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
+            )
         except pydantic.ValidationError:
             logger.warning("Invalid relation contents from the coordinator charm")
             return
@@ -348,7 +346,9 @@ class AirflowCoordinatorRequirerEventHandler(
             return
 
         try:
-            content = data_interfaces.build_model(repository, AirflowCoordinatorProviderModel)
+            content = self.interface.build_model(
+                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
+            )
         except pydantic.ValidationError:
             logger.warning("Invalid relation contents from the coordinator charm")
             return
@@ -370,7 +370,9 @@ class AirflowCoordinatorRequirerEventHandler(
     def provider_content(self) -> typing.Optional[AirflowCoordinatorProviderModel]:
         """Data from the related Airflow Coordinator charm."""
         try:
-            return data_interfaces.build_model(self.repository, AirflowCoordinatorProviderModel)
+            return self.interface.build_model(
+                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
+            )
         except pydantic.ValidationError:
             return None
 
@@ -445,7 +447,9 @@ class AirflowCoordinatorProviderEventHandler(
             return
 
         try:
-            content = data_interfaces.build_model(repository, AirflowCoordinatorRequirerModel)
+            content = self.interface.build_model(
+                event.relation.id, AirflowCoordinatorRequirerModel, component=event.relation.app
+            )
         except pydantic.ValidationError:
             logger.warning("Invalid relation contents from a core charm")
             return
@@ -550,6 +554,7 @@ class AirflowCoordinatorRequires(ops.Object):
         )
 
         self._charm = charm
+
         self._relation = charm.model.get_relation(relation_name)
 
         self.workload_container = charm.unit.get_container(workload_container_name)
@@ -594,6 +599,7 @@ class AirflowCoordinatorRequires(ops.Object):
             config,
             user="root",
             group="root",
+            make_dirs=True,
         )
 
         return True
@@ -622,6 +628,7 @@ class AirflowCoordinatorRequires(ops.Object):
             k8s_executor_pod_spec,
             user="root",
             group="root",
+            make_dirs=True,
         )
 
         return True
