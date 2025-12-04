@@ -623,7 +623,7 @@ class AirflowCoordinatorRequires(ops.Object):
 
     @property
     def relation_present(self) -> bool:
-        """Indicates whether the relation is ready."""
+        """Indicates whether the relation is present and active."""
         return self._relation and self._relation.active
 
     @property
