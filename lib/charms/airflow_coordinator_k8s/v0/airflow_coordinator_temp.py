@@ -262,8 +262,12 @@ class AirflowCoordinatorRequirerEventHandler(
         )
 
         self.relation = self.charm.model.get_relation(relation_name)
-        self.repository = data_interfaces.OpsRelationRepository(
-            self.model, self.relation, component=self.relation.app
+        self.repository = (
+            data_interfaces.OpsRelationRepository(
+                self.model, self.relation, component=self.relation.app
+            )
+            if self.relation
+            else None
         )
 
     def _dispatch_events(
@@ -422,7 +426,12 @@ class AirflowCoordinatorProviderEventHandler(
         self.interface = data_interfaces.OpsRelationRepositoryInterface(
             charm.model, relation_name, request_model
         )
-        self.relation = charm.model.relations[relation_name][0]
+
+        self.relation = (
+            charm.model.relations[relation_name][0]
+            if charm.model.relations[relation_name]
+            else None
+        )
 
     def _dispatch_events(
         self,
@@ -488,6 +497,9 @@ class AirflowCoordinatorProviderEventHandler(
         sensitive_data: dict[str, str] = {},
     ):
         """Update data to send to related core charms."""
+        if not self.interface.relations:
+            return
+
         if not any([config_template, kubernetes_executor_pod_spec, sensitive_data]):
             return
 
@@ -519,6 +531,9 @@ class AirflowCoordinatorProviderEventHandler(
 
     def set_validation_errors(self, failures: list[MetadataValidationError]) -> None:
         """Update validation errors to send to related core charms."""
+        if not self.interface.relations:
+            return
+
         if not self.charm.unit.is_leader():
             return
 
@@ -586,7 +601,7 @@ class AirflowCoordinatorRequires(ops.Object):
         self._relation = charm.model.get_relation(relation_name)
 
         self.workload_container = charm.unit.get_container(workload_container_name)
-        if self.workload_container.can_connect():
+        if self._relation and self.workload_container.can_connect():
             # TODO: pull airflow_version and workload_image_hash from container
             airflow_version = "3.1.0"
             workload_image_hash = "somehash"
@@ -607,13 +622,24 @@ class AirflowCoordinatorRequires(ops.Object):
         self.framework.observe(charm.on[relation_name].relation_broken, callback)
 
     @property
+    def ready(self) -> bool:
+        """Indicates whether the relation is ready."""
+        return bool(self._relation and self._relation.active)
+
+    @property
     def airflow_core_validation_failures(self) -> list[str]:
         """Airflow core charm validation failures."""
+        if not self.ready:
+            return []
+
         return [failure.message for failure in self._requirer_handler.validation_failures]
 
     @property
     def validation_failure_messages(self) -> list[str]:
         """Validation failures for this charm from Airflow coordinator."""
+        if not self.ready:
+            return []
+
         return [
             failure.message
             for failure in self._requirer_handler.validation_failures
@@ -625,7 +651,7 @@ class AirflowCoordinatorRequires(ops.Object):
         if not self.workload_container.can_connect():
             return False
 
-        if not self._relation or not self._relation.active:
+        if not self.ready:
             return False
 
         if self.validation_failure_messages:
@@ -654,7 +680,7 @@ class AirflowCoordinatorRequires(ops.Object):
         if not self.workload_container.can_connect():
             return False
 
-        if not self._relation or not self._relation.active:
+        if not self.ready:
             return False
 
         if self.validation_failure_messages:

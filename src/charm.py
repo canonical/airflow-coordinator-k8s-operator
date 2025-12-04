@@ -39,6 +39,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         error_message = self._provider.validate_core_components()
         if error_message:
+            self.unit.status = ops.BlockedStatus()
             self.app.status = ops.BlockedStatus(error_message)
             return
 
