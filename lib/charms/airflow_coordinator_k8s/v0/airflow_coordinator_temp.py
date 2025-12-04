@@ -622,14 +622,24 @@ class AirflowCoordinatorRequires(ops.Object):
         self.framework.observe(charm.on[relation_name].relation_broken, callback)
 
     @property
-    def ready(self) -> bool:
+    def relation_present(self) -> bool:
         """Indicates whether the relation is ready."""
-        return bool(self._relation and self._relation.active)
+        return self._relation and self._relation.active
+
+    @property
+    def ready(self) -> bool:
+        """Indicates whether relation is ready, config available and workload can be started."""
+        return (
+            not self.missing_core_components_exist
+            and not self.validation_failure_messages
+            and self._requirer_handler.provider_content
+            and self._requirer_handler.provider_content.config_template
+        )
 
     @property
     def airflow_core_validation_failures(self) -> list[str]:
         """Airflow core charm validation failures."""
-        if not self.ready:
+        if not self.relation_present:
             return []
 
         return [failure.message for failure in self._requirer_handler.validation_failures]
@@ -637,7 +647,7 @@ class AirflowCoordinatorRequires(ops.Object):
     @property
     def validation_failure_messages(self) -> list[str]:
         """Validation failures for this charm from Airflow coordinator."""
-        if not self.ready:
+        if not self.relation_present:
             return []
 
         return [
@@ -645,6 +655,18 @@ class AirflowCoordinatorRequires(ops.Object):
             for failure in self._requirer_handler.validation_failures
             if failure.component == self._component
         ]
+
+    @property
+    def missing_core_components_exist(self) -> bool:
+        """Indicates if coordinator reports missing components for the cluster."""
+        if not self.relation_present:
+            return True
+
+        return any(
+            failure
+            for failure in self._requirer_handler.validation_failures
+            if failure.code == MISSING_COMPONENT
+        )
 
     def write_airflow_config(self, config_path: str) -> bool:
         """Render the Airflow config in the provided path in the workload container."""
@@ -654,15 +676,12 @@ class AirflowCoordinatorRequires(ops.Object):
         if not self.ready:
             return False
 
-        if self.validation_failure_messages:
-            return False
-
         provider_content = self._requirer_handler.provider_content
-        if not provider_content:
-            return False
 
-        config = jinja2.Template(provider_content.config_template).render(
-            json.loads(provider_content.sensitive_data)
+        config = (
+            jinja2.Environment()
+            .from_string(provider_content.config_template)
+            .render(**json.loads(provider_content.sensitive_data))
         )
 
         self.workload_container.push(
@@ -683,19 +702,16 @@ class AirflowCoordinatorRequires(ops.Object):
         if not self.ready:
             return False
 
-        if self.validation_failure_messages:
-            return False
-
         provider_content = self._requirer_handler.provider_content
-        if not provider_content:
-            return False
 
         if not provider_content.kubernetes_executor_pod_spec:
             return False
 
-        k8s_executor_pod_spec = jinja2.Template(
-            provider_content.kubernetes_executor_pod_spec
-        ).render(json.loads(provider_content.sensitive_data))
+        k8s_executor_pod_spec = (
+            jinja2.Environment()
+            .from_string(provider_content.kubernetes_executor_pod_spec)
+            .render(**json.loads(provider_content.sensitive_data))
+        )
 
         self.workload_container.push(
             filepath,
@@ -722,6 +738,7 @@ class AirflowCoordinatorProvides(ops.Object):
         )
 
         self.framework.observe(self._provider_handler.on.airflow_core_metadata_available, callback)
+        self.framework.observe(charm.on[relation_name].relation_broken, callback)
 
     def validate_core_components(self, set_validation_errors: bool = True) -> typing.Optional[str]:  # noqa: C901
         """Check validity of all related core charms."""
