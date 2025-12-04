@@ -21,8 +21,14 @@ def context(airflow_coordinator_k8s_charm):
     return ops.testing.Context(charm_type=airflow_coordinator_k8s_charm)
 
 
-def core_component_metadata(component: str):
-    return {"airflow_version": "3.1.0", "workload_image_hash": "somehash", "component": component}
+def core_component_metadata(
+    component: str, airflow_version: str = "3.1.0", workload_image_hash: str = "somehash"
+) -> dict[str, str]:
+    return {
+        "airflow_version": airflow_version,
+        "workload_image_hash": workload_image_hash,
+        "component": component,
+    }
 
 
 @pytest.fixture(scope="function")

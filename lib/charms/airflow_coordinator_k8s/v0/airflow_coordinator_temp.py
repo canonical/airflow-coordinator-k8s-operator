@@ -65,6 +65,9 @@ class AirflowCoordinatorRequirerModel(data_interfaces.BaseCommonModel):
     workload_image_hash: str
     component: REQUIRED_AIRFLOW_CORE_COMPONENTS_LITERAL
 
+    # hack to enable databag diff computation with data_interfaces v1 charm lib
+    request_id: str = pydantic.Field(default="fixed_request_id", exclude=True)
+
     @pydantic.model_validator(mode="after")
     def validate_fields(self):
         """Validates that no inconsistent request sent to Airflow Coordinator."""
@@ -93,18 +96,29 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
     sensitive_data: SensitiveDataSecretStr = pydantic.Field(default=None)
     secret_sensitive_data: data_interfaces.SecretString = pydantic.Field(default=None)
 
-    validation_failures: list[MetadataValidationError] | None = pydantic.Field(default=[])
+    validation_failures: str | None = pydantic.Field(default=None)
 
     # hack to enable databag diff computation with data_interfaces v1 charm lib
     request_id: str = pydantic.Field(default="fixed_request_id", exclude=True)
+
+    @pydantic.field_validator("validation_failures", mode="before")
+    @classmethod
+    def validate_validation_failures(
+        cls, validation_failures: str | list[dict[str, typing.Any]] | None
+    ) -> str:
+        """Validator for validation_failures, ensure conversion to string."""
+        # data_interfaces.RepositoryInterface.build_model uses json.loads on all
+        # fields, meaning the field can be a list of dicts instead of string
+        if isinstance(validation_failures, list):
+            return json.dumps(validation_failures)
+
+        return validation_failures
 
     @pydantic.model_validator(mode="after")
     def validate_fields(self):
         """Validates and modifies, if necessary, response to be sent from Airflow Coordinator."""
         if self.validation_failures:
             return self
-
-        self.validation_failures = None
 
         if not self.config_template:
             raise ValueError("Missing config template")
@@ -324,8 +338,8 @@ class AirflowCoordinatorRequirerEventHandler(
             content = self.interface.build_model(
                 self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
             )
-        except pydantic.ValidationError:
-            logger.warning("Invalid relation contents from the coordinator charm")
+        except pydantic.ValidationError as e:
+            logger.warning(f"Invalid relation contents from the coordinator charm: {e}")
             return
 
         getattr(self.on, "airflow_config_updated").emit(
@@ -344,16 +358,12 @@ class AirflowCoordinatorRequirerEventHandler(
             self.model, event.relation, component=event.relation.app
         )
 
-        # Don't do anything until we get some data
-        if not repository.get_data():
-            return
-
         try:
             content = self.interface.build_model(
                 self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
             )
-        except pydantic.ValidationError:
-            logger.warning("Invalid relation contents from the coordinator charm")
+        except pydantic.ValidationError as e:
+            logger.warning(f"Invalid relation contents from the coordinator charm: {e}")
             return
 
         self._handle_event(event, repository, content)
@@ -378,6 +388,18 @@ class AirflowCoordinatorRequirerEventHandler(
             )
         except pydantic.ValidationError:
             return None
+
+    @property
+    def validation_failures(self) -> list[MetadataValidationError]:
+        """Validation failures from the related Airflow Coordinator charm."""
+        return (
+            [
+                MetadataValidationError(**failure)
+                for failure in json.loads(self.provider_content.validation_failures)
+            ]
+            if self.provider_content and self.provider_content.validation_failures
+            else []
+        )
 
 
 class AirflowCoordinatorProviderEventHandler(
@@ -453,8 +475,8 @@ class AirflowCoordinatorProviderEventHandler(
             content = self.interface.build_model(
                 event.relation.id, AirflowCoordinatorRequirerModel, component=event.relation.app
             )
-        except pydantic.ValidationError:
-            logger.warning("Invalid relation contents from a core charm")
+        except pydantic.ValidationError as e:
+            logger.warning(f"Invalid relation contents from a core charm: {e}")
             return
 
         self._handle_event(event, repository, content)
@@ -500,12 +522,14 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.charm.unit.is_leader():
             return
 
+        failures_serialized = json.dumps([failure.model_dump() for failure in failures])
+
         try:
             model = self.interface.build_model(self.relation.id, AirflowCoordinatorProviderModel)
-            model.validation_failures = failures
+            model.validation_failures = failures_serialized
         except pydantic.ValidationError:
             model = AirflowCoordinatorProviderModel(
-                validation_failures=failures,
+                validation_failures=failures_serialized,
             )
 
         for relation in self.interface.relations:
@@ -557,6 +581,7 @@ class AirflowCoordinatorRequires(ops.Object):
         )
 
         self._charm = charm
+        self._component = component
 
         self._relation = charm.model.get_relation(relation_name)
 
@@ -581,12 +606,29 @@ class AirflowCoordinatorRequires(ops.Object):
         )
         self.framework.observe(charm.on[relation_name].relation_broken, callback)
 
+    @property
+    def airflow_core_validation_failures(self) -> list[str]:
+        """Airflow core charm validation failures."""
+        return [failure.message for failure in self._requirer_handler.validation_failures]
+
+    @property
+    def validation_failure_messages(self) -> list[str]:
+        """Validation failures for this charm from Airflow coordinator."""
+        return [
+            failure.message
+            for failure in self._requirer_handler.validation_failures
+            if failure.component == self._component
+        ]
+
     def write_airflow_config(self, config_path: str) -> bool:
         """Render the Airflow config in the provided path in the workload container."""
         if not self.workload_container.can_connect():
             return False
 
         if not self._relation or not self._relation.active:
+            return False
+
+        if self.validation_failure_messages:
             return False
 
         provider_content = self._requirer_handler.provider_content
@@ -613,6 +655,9 @@ class AirflowCoordinatorRequires(ops.Object):
             return False
 
         if not self._relation or not self._relation.active:
+            return False
+
+        if self.validation_failure_messages:
             return False
 
         provider_content = self._requirer_handler.provider_content
@@ -652,7 +697,7 @@ class AirflowCoordinatorProvides(ops.Object):
 
         self.framework.observe(self._provider_handler.on.airflow_core_metadata_available, callback)
 
-    def validate_core_components(self) -> typing.Optional[str]:
+    def validate_core_components(self, set_validation_errors: bool = True) -> typing.Optional[str]:  # noqa: C901
         """Check validity of all related core charms."""
         core_charms_metadata = self._provider_handler.core_charms_metadata
 
@@ -660,17 +705,18 @@ class AirflowCoordinatorProvides(ops.Object):
             set(REQUIRED_AIRFLOW_CORE_COMPONENTS) - set(core_charms_metadata.keys())
         )
         if missing_components:
-            validation_error_messages = [
-                MetadataValidationError(
-                    component=component,
-                    code=MISSING_COMPONENT,
-                )
-                for component in missing_components
-            ]
+            if set_validation_errors:
+                validation_error_messages = [
+                    MetadataValidationError(
+                        component=component,
+                        code=MISSING_COMPONENT,
+                    )
+                    for component in missing_components
+                ]
 
-            self._provider_handler.set_validation_errors(validation_error_messages)
+                self._provider_handler.set_validation_errors(validation_error_messages)
 
-            return f"Missing integrations with {', '.join(missing_components)}"
+            return f"Missing integrations with {', '.join(sorted(missing_components))}"
 
         airflow_versions, workload_image_hashes = (
             collections.defaultdict(int),
@@ -689,26 +735,27 @@ class AirflowCoordinatorProvides(ops.Object):
             workload_image_hashes, key=workload_image_hashes.get
         )
 
-        validation_error_messages = []
+        if set_validation_errors:
+            validation_error_messages = []
 
-        for component, metadata in core_charms_metadata.items():
-            if metadata.airflow_version != version_with_max_count:
-                validation_error_messages.append(
-                    MetadataValidationError(
-                        component=component,
-                        code=INCONSISTENT_AIRFLOW_VERSION,
+            for component, metadata in core_charms_metadata.items():
+                if metadata.airflow_version != version_with_max_count:
+                    validation_error_messages.append(
+                        MetadataValidationError(
+                            component=component,
+                            code=INCONSISTENT_AIRFLOW_VERSION,
+                        )
                     )
-                )
 
-            if metadata.workload_image_hash != workload_image_hash_with_max_count:
-                validation_error_messages.append(
-                    MetadataValidationError(
-                        component=component,
-                        code=INCONSISTENT_WORKLOAD_IMAGE_HASH,
+                if metadata.workload_image_hash != workload_image_hash_with_max_count:
+                    validation_error_messages.append(
+                        MetadataValidationError(
+                            component=component,
+                            code=INCONSISTENT_WORKLOAD_IMAGE_HASH,
+                        )
                     )
-                )
 
-        self._provider_handler.set_validation_errors(validation_error_messages)
+            self._provider_handler.set_validation_errors(validation_error_messages)
 
         error_message = None
 
@@ -733,6 +780,12 @@ class AirflowCoordinatorProvides(ops.Object):
         sensitive_data: dict[str, str] = {},
     ) -> None:
         """Update config with related core charms."""
+        if self.validate_core_components() is not None:
+            logger.warning(
+                "Attempting to write airflow configuration when validation errors exist"
+            )
+            return
+
         self._provider_handler.update_content(
             config_template=config_template,
             kubernetes_executor_pod_spec=k8s_executor_pod_spec_template,
