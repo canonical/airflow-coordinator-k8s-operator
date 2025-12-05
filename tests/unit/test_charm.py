@@ -9,16 +9,44 @@ import unittest.mock
 
 import ops
 import ops.testing
+from conftest import POSTGRES_DATA, POSTGRES_SQL_ALCHEMY_STRING
 
 
 def test_non_leader_unit(context, state):
     state = dataclasses.replace(state, leader=False)
 
-    app_status_before = state.app_status
+    unit_status_before = state.unit_status
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == app_status_before
+    assert state_out.unit_status == unit_status_before
+
+
+def test_missing_postgres_relation(context, state, all_required_relations, postgres_relation):
+    all_required_relations.remove(postgres_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus("Missing relation with postgres")
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_missing_postgres_relation_data(context, state, all_required_relations, postgres_relation):
+    empty_postgres_relation = dataclasses.replace(postgres_relation, remote_app_data={})
+
+    all_required_relations.remove(postgres_relation)
+    all_required_relations.append(empty_postgres_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.WaitingStatus("Waiting for airflow database to be created")
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
 
 
 def test_missing_core_charm_relations(
@@ -30,7 +58,7 @@ def test_missing_core_charm_relations(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus(
+    assert state_out.unit_status == ops.BlockedStatus(
         "Missing integrations with scheduler, triggerer"
     )
 
@@ -75,7 +103,7 @@ def test_invalid_core_charm_airflow_version(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus("Integrated apps with mismatched versions")
+    assert state_out.unit_status == ops.BlockedStatus("Integrated apps with mismatched versions")
 
     failures = json.dumps(
         [
@@ -113,7 +141,7 @@ def test_invalid_core_charm_workload_image_hash(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus(
+    assert state_out.unit_status == ops.BlockedStatus(
         "Integrated apps with inconsistent image hashes"
     )
 
@@ -131,24 +159,33 @@ def test_invalid_core_charm_workload_image_hash(
         assert relation.local_app_data == {"validation-failures": failures}
 
 
-def test_happy_path(context, state):
+def test_happy_path(context, state, postgres_relation):
     with (
         unittest.mock.patch(
             "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(return_value="mock_config"),
+            new_callable=unittest.mock.PropertyMock(
+                return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            ),
         ),
         unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.sensitive_config_values",
-            new_callable=unittest.mock.PropertyMock(return_value={"secret": "s3cret"}),
+            "charms.data_platform_libs.v0.data_interfaces.DatabaseRequires.fetch_my_relation_data",
+            return_value={postgres_relation.id: POSTGRES_DATA},
         ),
     ):
         state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.ActiveStatus()
+    assert state_out.unit_status == ops.ActiveStatus()
 
     for relation in state_out.get_relations("airflow-coordinator"):
-        assert relation.local_app_data["config-template"] == "mock_config"
+        assert (
+            relation.local_app_data["config-template"]
+            == "mock_config: {{ sql_alchemy_connection_string }}"
+        )
 
         assert state_out.get_secret(
             id=relation.local_app_data["secret-sensitive-data"]
-        ).latest_content == {"sensitive-data": json.dumps({"secret": "s3cret"})}
+        ).latest_content == {
+            "sensitive-data": json.dumps(
+                {"sql_alchemy_connection_string": POSTGRES_SQL_ALCHEMY_STRING}
+            )
+        }
