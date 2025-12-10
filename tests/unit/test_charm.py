@@ -30,8 +30,8 @@ def test_missing_core_charm_relations(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus(
-        "Missing integrations with scheduler, triggerer"
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Missing integrations with: scheduler, triggerer"
     )
 
     failures = json.dumps(
@@ -39,12 +39,10 @@ def test_missing_core_charm_relations(
             {
                 "component": "scheduler",
                 "code": "missing_component",
-                "message": "Required component is missing in the cluster",
             },
             {
                 "component": "triggerer",
                 "code": "missing_component",
-                "message": "Required component is missing in the cluster",
             },
         ]
     )
@@ -75,14 +73,13 @@ def test_invalid_core_charm_airflow_version(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus("Integrated apps with mismatched versions")
+    assert state_out.unit_status == ops.BlockedStatus("Integrated apps with mismatched airflow versions")
 
     failures = json.dumps(
         [
             {
                 "component": "scheduler",
                 "code": "inconsistent_airflow_version",
-                "message": "Component has an airflow version inconsistent with the cluster",
             },
         ]
     )
@@ -113,8 +110,8 @@ def test_invalid_core_charm_workload_image_hash(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.BlockedStatus(
-        "Integrated apps with inconsistent image hashes"
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Integrated apps with mismatched workload image hashes"
     )
 
     failures = json.dumps(
@@ -122,7 +119,6 @@ def test_invalid_core_charm_workload_image_hash(
             {
                 "component": "scheduler",
                 "code": "inconsistent_workload_image_hash",
-                "message": "Component has a workload image hash that is inconsistent with the cluster",  # noqa: E501
             },
         ]
     )
@@ -144,7 +140,7 @@ def test_happy_path(context, state):
     ):
         state_out = context.run(context.on.start(), state)
 
-    assert state_out.app_status == ops.ActiveStatus()
+    assert state_out.unit_status == ops.ActiveStatus()
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data["config-template"] == "mock_config"

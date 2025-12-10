@@ -28,8 +28,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self, AIRFLOW_COORDINATOR_RELATION_NAME, callback=self.reconcile
         )
 
-        self.framework.observe(self.on.start, self.reconcile)
-        self.framework.observe(self.on.update_status, self.reconcile)
+        for event in [
+            self.on.start,
+            self.on.update_status,
+        ]:
+            self.framework.observe(event, self.reconcile)
 
     def reconcile(self, _) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
@@ -37,10 +40,25 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self.unit.is_leader():
             return
 
-        error_message = self._provider.validate_core_components()
-        if error_message:
-            self.unit.status = ops.BlockedStatus()
-            self.app.status = ops.BlockedStatus(error_message)
+        if self._provider.missing_core_components:
+            self._provider.set_validation_errors()
+
+            self.unit.status = ops.BlockedStatus(
+                f"Missing integrations with: {', '.join(self._provider.missing_core_components)}"
+            )
+            return
+
+        if (
+            not self._provider.are_airflow_versions_consistent
+            or not self._provider.are_workload_image_hashes_consistent
+        ):
+            self._provider.set_validation_errors()
+
+            self.unit.status = ops.BlockedStatus(
+                "Integrated apps with mismatched airflow versions"
+                if not self._provider.are_airflow_versions_consistent
+                else "Integrated apps with mismatched workload image hashes"
+            )
             return
 
         self._provider.set_airflow_config(
@@ -48,7 +66,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             sensitive_data=self._config_generator.sensitive_config_values,
         )
 
-        self.app.status = ops.ActiveStatus()
+        self.unit.status = ops.ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover
