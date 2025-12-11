@@ -21,7 +21,7 @@ class AirflowConfigGenerator:
         self._charm = charm
 
     @property
-    def config_template(self) -> typing.Optional[str]:
+    def config_template(self) -> str:
         """The Airflow config template to pass to all related components."""
         with open("src/templates/airflow_config.j2") as config_template_file:
             config_template = config_template_file.read()
