@@ -9,7 +9,7 @@ import logging
 import pathlib
 import typing
 
-import charms.airflow_coordinator_k8s.v0.airflow_coordinator_temp as airflow_coordinator
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
 import pytest
@@ -29,7 +29,7 @@ class AirflowCoreApplicationCharm(ops.CharmBase):
             self,
             AIRFLOW_COORDINATOR_RELATION_INTERFACE,
             component="scheduler",
-            workload_container_name="workload-container",
+            workload_container=self.unit.get_container("workload-container"),
             callback=self.reconcile,
         )
 
@@ -98,17 +98,11 @@ def missing_components_relation_data():
             [
                 {
                     "component": "scheduler",
-                    "code": airflow_coordinator.MISSING_COMPONENT,
-                    "message": airflow_coordinator.METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE[
-                        airflow_coordinator.MISSING_COMPONENT
-                    ],
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.MISSING_COMPONENT,
                 },
                 {
                     "component": "triggerer",
-                    "code": airflow_coordinator.MISSING_COMPONENT,
-                    "message": airflow_coordinator.METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE[
-                        airflow_coordinator.MISSING_COMPONENT
-                    ],
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.MISSING_COMPONENT,
                 },
             ],
         ),
@@ -122,10 +116,7 @@ def invalid_airflow_version_relation_data():
             [
                 {
                     "component": "scheduler",
-                    "code": airflow_coordinator.INCONSISTENT_AIRFLOW_VERSION,
-                    "message": airflow_coordinator.METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE[
-                        airflow_coordinator.INCONSISTENT_AIRFLOW_VERSION
-                    ],
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION,  # noqa: E501
                 },
             ],
         ),
@@ -139,10 +130,7 @@ def invalid_workload_image_hash_relation_data():
             [
                 {
                     "component": "scheduler",
-                    "code": airflow_coordinator.INCONSISTENT_WORKLOAD_IMAGE_HASH,
-                    "message": airflow_coordinator.METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE[
-                        airflow_coordinator.INCONSISTENT_WORKLOAD_IMAGE_HASH
-                    ],
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH,  # noqa: E501
                 },
             ],
         ),
@@ -289,7 +277,7 @@ class TestAirflowCoordinatorRequires:
             assert len(manager.charm.requirer.airflow_core_validation_failures) == 2
 
             assert sorted(manager.charm.requirer.airflow_core_validation_failures) == [
-                failure["message"]
+                failure["code"]
                 for failure in json.loads(missing_components_relation_data["validation-failures"])
             ]
 
@@ -317,7 +305,7 @@ class TestAirflowCoordinatorRequires:
             assert len(manager.charm.requirer.validation_failure_messages) == 1
 
             assert sorted(manager.charm.requirer.validation_failure_messages) == [
-                failure["message"]
+                failure["code"]
                 for failure in json.loads(missing_components_relation_data["validation-failures"])
                 if failure["component"] == "scheduler"
             ]
@@ -338,7 +326,9 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert manager.charm.requirer.write_airflow_config("/config/path")
+            assert manager.charm.requirer.can_write_airflow_config
+
+            manager.charm.requirer.write_airflow_config("/config/path")
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context
@@ -351,7 +341,7 @@ class TestAirflowCoordinatorRequires:
             assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
 
-    def test_write_airflow_config_with_mismatched_airflow_version_failures(
+    def test_can_write_airflow_config_with_mismatched_airflow_version_failures(
         self,
         application_context,
         application_state,
@@ -370,7 +360,7 @@ class TestAirflowCoordinatorRequires:
             application_context.on.relation_changed(relation_mismatched_airflow_versions),
             state_mismatched_airflow_versions,
         ) as manager:
-            state_out = manager.run()
+            manager.run()
             assert (
                 self.get_juju_log_line(
                     "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
@@ -378,17 +368,9 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert not manager.charm.requirer.write_airflow_config("/config/path")
+            assert not manager.charm.requirer.can_write_airflow_config
 
-            filesystem = state_out.get_container("workload-container").get_filesystem(
-                application_context
-            )
-
-            config_file_path = pathlib.Path(f"{filesystem.absolute()}/config/path")
-
-            assert not config_file_path.exists()
-
-    def test_write_airflow_config_with_mismatched_workload_image_hash(
+    def test_can_write_airflow_config_with_mismatched_workload_image_hash(
         self,
         application_context,
         application_state,
@@ -407,7 +389,7 @@ class TestAirflowCoordinatorRequires:
             application_context.on.relation_changed(relation_mismatched_workload_image_hash),
             state_mismatched_airflow_versions,
         ) as manager:
-            state_out = manager.run()
+            manager.run()
             assert (
                 self.get_juju_log_line(
                     "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
@@ -415,15 +397,7 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert not manager.charm.requirer.write_airflow_config("/config/path")
-
-            filesystem = state_out.get_container("workload-container").get_filesystem(
-                application_context
-            )
-
-            config_file_path = pathlib.Path(f"{filesystem.absolute()}/config/path")
-
-            assert not config_file_path.exists()
+            assert not manager.charm.requirer.can_write_airflow_config
 
     def test_write_k8s_executor_pod_spec(
         self, application_context, application_state, application_airflow_coordinator_relation
@@ -438,7 +412,9 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert manager.charm.requirer.write_kubernetes_executor_pod_spec(
+            assert manager.charm.requirer.can_write_kubernetes_executor_pod_spec
+
+            manager.charm.requirer.write_kubernetes_executor_pod_spec(
                 "/k8s_executor_pod_spec/path"
             )
 
@@ -453,7 +429,7 @@ class TestAirflowCoordinatorRequires:
             assert config_file_path.read_text(encoding="utf-8") == "test-pod-spec: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
 
-    def test_write_k8s_executor_pod_spec_with_mismatched_airflow_version_failures(
+    def test_can_write_k8s_executor_pod_spec_with_mismatched_airflow_version_failures(
         self,
         application_context,
         application_state,
@@ -472,7 +448,7 @@ class TestAirflowCoordinatorRequires:
             application_context.on.relation_changed(relation_mismatched_airflow_versions),
             state_mismatched_airflow_versions,
         ) as manager:
-            state_out = manager.run()
+            manager.run()
             assert (
                 self.get_juju_log_line(
                     "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
@@ -480,19 +456,9 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert not manager.charm.requirer.write_kubernetes_executor_pod_spec(
-                "/k8s_executor_pod_spec/path"
-            )
+            assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
-            filesystem = state_out.get_container("workload-container").get_filesystem(
-                application_context
-            )
-
-            config_file_path = pathlib.Path(f"{filesystem.absolute()}/k8s_executor_pod_spec/path")
-
-            assert not config_file_path.exists()
-
-    def test_write_k8s_executor_pod_spec_with_mismatched_workload_image_hash(
+    def test_can_write_k8s_executor_pod_spec_with_mismatched_workload_image_hash(
         self,
         application_context,
         application_state,
@@ -511,7 +477,7 @@ class TestAirflowCoordinatorRequires:
             application_context.on.relation_changed(relation_mismatched_workload_image_hash),
             state_mismatched_airflow_versions,
         ) as manager:
-            state_out = manager.run()
+            manager.run()
             assert (
                 self.get_juju_log_line(
                     "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
@@ -519,17 +485,7 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
-            assert not manager.charm.requirer.write_kubernetes_executor_pod_spec(
-                "/k8s_executor_pod_spec/path"
-            )
-
-            filesystem = state_out.get_container("workload-container").get_filesystem(
-                application_context
-            )
-
-            config_file_path = pathlib.Path(f"{filesystem.absolute()}/k8s_executor_pod_spec/path")
-
-            assert not config_file_path.exists()
+            assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
 
 class TestAirflowCoordinatorProvides:
@@ -538,7 +494,7 @@ class TestAirflowCoordinatorProvides:
             level=log_level, message=f"§Provider reacting to event: {event}"
         )
 
-    def test_validate_core_components(self, coordinator_context):
+    def test_set_validation_errors_with_no_issues(self, coordinator_context):
         state = generate_coordinator_state()
 
         with coordinator_context(
@@ -553,7 +509,7 @@ class TestAirflowCoordinatorProvides:
                 in coordinator_context.juju_log
             )
 
-            assert manager.charm.provider.validate_core_components() is None
+            manager.charm.provider.set_validation_errors()
 
             for relation in state_out.relations:
                 assert "validation-failures" not in relation.local_app_data
@@ -565,9 +521,7 @@ class TestAirflowCoordinatorProvides:
             failure["component"]
             for failure in json.loads(missing_components_relation_data["validation-failures"])
         }
-        present_components = (
-            set(airflow_coordinator.REQUIRED_AIRFLOW_CORE_COMPONENTS) - missing_components
-        )
+        present_components = set(airflow_coordinator.AirflowCoreComponentEnum) - missing_components
 
         state = generate_coordinator_state({component: {} for component in present_components})
 
@@ -583,21 +537,15 @@ class TestAirflowCoordinatorProvides:
                 in coordinator_context.juju_log
             )
 
-            assert (
-                manager.charm.provider.validate_core_components()
-                == f"Missing integrations with {', '.join(sorted(missing_components))}"
-            )
+            assert manager.charm.provider.missing_core_components
+
+            manager.charm.provider.set_validation_errors()
 
             for relation in state_out.relations:
                 assert (
                     relation.local_app_data["validation-failures"]
                     == missing_components_relation_data["validation-failures"]
                 )
-
-            manager.charm.provider.set_airflow_config("test-config")
-
-            for relation in state_out.relations:
-                assert "config-template" not in relation.local_app_data
 
     def test_provider_methods_when_invalid_airflow_version(
         self, coordinator_context, invalid_airflow_version_relation_data
@@ -610,9 +558,7 @@ class TestAirflowCoordinatorProvides:
         component_permutations = {
             component: {"airflow_version": "0.0.0"} for component in invalid_components
         }
-        for component in (
-            set(airflow_coordinator.REQUIRED_AIRFLOW_CORE_COMPONENTS) - invalid_components
-        ):
+        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)
@@ -629,21 +575,17 @@ class TestAirflowCoordinatorProvides:
                 in coordinator_context.juju_log
             )
 
-            assert (
-                manager.charm.provider.validate_core_components()
-                == "Integrated apps with mismatched versions"
-            )
+            assert not manager.charm.provider.missing_core_components
+            assert not manager.charm.provider.are_airflow_versions_consistent
+            assert manager.charm.provider.are_workload_image_hashes_consistent
+
+            manager.charm.provider.set_validation_errors()
 
             for relation in state_out.relations:
                 assert (
                     relation.local_app_data["validation-failures"]
                     == invalid_airflow_version_relation_data["validation-failures"]
                 )
-
-            manager.charm.provider.set_airflow_config("test-config")
-
-            for relation in state_out.relations:
-                assert "config-template" not in relation.local_app_data
 
     def test_provider_methods_when_invalid_workload_image_hash(
         self, coordinator_context, invalid_workload_image_hash_relation_data
@@ -658,9 +600,7 @@ class TestAirflowCoordinatorProvides:
         component_permutations = {
             component: {"workload_image_hash": "0.0.0"} for component in invalid_components
         }
-        for component in (
-            set(airflow_coordinator.REQUIRED_AIRFLOW_CORE_COMPONENTS) - invalid_components
-        ):
+        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)
@@ -677,21 +617,17 @@ class TestAirflowCoordinatorProvides:
                 in coordinator_context.juju_log
             )
 
-            assert (
-                manager.charm.provider.validate_core_components()
-                == "Integrated apps with inconsistent image hashes"
-            )
+            assert not manager.charm.provider.missing_core_components
+            assert manager.charm.provider.are_airflow_versions_consistent
+            assert not manager.charm.provider.are_workload_image_hashes_consistent
+
+            manager.charm.provider.set_validation_errors()
 
             for relation in state_out.relations:
                 assert (
                     relation.local_app_data["validation-failures"]
                     == invalid_workload_image_hash_relation_data["validation-failures"]
                 )
-
-            manager.charm.provider.set_airflow_config("test-config")
-
-            for relation in state_out.relations:
-                assert "config-template" not in relation.local_app_data
 
     def test_set_airflow_config(self, coordinator_context):
         state = generate_coordinator_state()

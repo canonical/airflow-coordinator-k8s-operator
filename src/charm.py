@@ -6,11 +6,9 @@
 
 import logging
 
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import ops
-
-# TODO: change to official charm lib name after charmhub registration + lib is published
-from charms.airflow_coordinator_k8s.v0.airflow_coordinator_temp import AirflowCoordinatorProvides
 
 import config_generator
 import constants
@@ -39,64 +37,71 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         super().__init__(framework)
 
         self._config_generator = config_generator.AirflowConfigGenerator(self)
-        self._config_provider = AirflowCoordinatorProvides(
-            self, constants.AIRFLOW_COORDINATOR_RELATION_NAME, callback=self._reconcile
-        )
 
         self._database_requires = data_interfaces_v0.DatabaseRequires(
             self, constants.POSTGRES_RELATION_NAME, database_name=constants.AIRFLOW_DATABASE_NAME
         )
-        self.framework.observe(self._database_requires.on.database_created, self._reconcile)
-        self.framework.observe(self._database_requires.on.endpoints_changed, self._reconcile)
-        self.framework.observe(
-            self.on[constants.POSTGRES_RELATION_NAME].relation_broken, self._reconcile
+        self._config_provider = airflow_coordinator.AirflowCoordinatorProvides(
+            self, constants.AIRFLOW_COORDINATOR_RELATION_NAME, callback=self._reconcile
         )
 
-        self.framework.observe(self.on.start, self._reconcile)
-        self.framework.observe(self.on.update_status, self._reconcile)
+        for event in [
+            self.on.start,
+            self.on.update_status,
+            self._database_requires.on.database_created,
+            self._database_requires.on.endpoints_changed,
+            self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
+        ]:
+            self.framework.observe(event, self._reconcile)
 
-    def _is_ready(self, raise_exceptions: bool = True) -> bool:
-        """Check whether the charm is ready; all necessary relations active."""
-        # TODO: restrict the application to 1 unit?
-        if not self.unit.is_leader():
-            return False
-
+    def _perform_checks(self) -> None:
+        """Checks to ensure the charm is able to generate and distribute configs."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
-            if raise_exceptions:
-                raise ExceptionWithStatusError("Missing relation with postgres", ops.BlockedStatus)
-
-            return False
+            raise ExceptionWithStatusError("Missing integration with postgres", ops.BlockedStatus)
 
         if not self._database_requires.is_resource_created():
-            if raise_exceptions:
-                raise ExceptionWithStatusError(
-                    "Waiting for airflow database to be created", ops.WaitingStatus
-                )
+            raise ExceptionWithStatusError(
+                "Waiting for airflow database to be created", ops.WaitingStatus
+            )
 
-            return False
+        missing_core_components = self._config_provider.missing_core_components
+        if missing_core_components:
+            self._config_provider.set_validation_errors()
 
-        error_message = self._config_provider.validate_core_components()
-        if error_message:
-            if raise_exceptions:
-                raise ExceptionWithStatusError(error_message, ops.BlockedStatus)
+            raise ExceptionWithStatusError(
+                f"Missing integrations with: {', '.join(missing_core_components)}",
+                ops.BlockedStatus,
+            )
 
-            return False
+        if not self._config_provider.are_airflow_versions_consistent:
+            self._config_provider.set_validation_errors()
 
-        return True
+            raise ExceptionWithStatusError(
+                "Integrated apps with mismatched airflow versions", ops.BlockedStatus
+            )
+
+        if not self._config_provider.are_workload_image_hashes_consistent:
+            self._config_provider.set_validation_errors()
+
+            raise ExceptionWithStatusError(
+                "Integrated apps with mismatched workload image hashes", ops.BlockedStatus
+            )
 
     def _reconcile(self, _) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
+        if not self.unit.is_leader():
+            return
+
         try:
-            if not self._is_ready():
-                return
+            self._perform_checks()
+
+            self._config_provider.set_airflow_config(
+                self._config_generator.config_template,
+                sensitive_data=self._config_generator.sensitive_config_values,
+            )
         except ExceptionWithStatusError as e:
             self.unit.status = e.status
             return
-
-        self._config_provider.set_airflow_config(
-            self._config_generator.config_template,
-            sensitive_data=self._config_generator.sensitive_config_values,
-        )
 
         self.unit.status = ops.ActiveStatus()
 

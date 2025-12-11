@@ -1,7 +1,7 @@
 # This file configures Charmcraft.
 # See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
 type: charm
-name: airflow-coordinator-k8s-operator
+name: airflow-coordinator-k8s
 title: Airflow Coordinator
 summary: A charm to coordinate Airflow Core charms
 description: |
@@ -37,7 +37,6 @@ parts:
     source: .
     stage:
       - LICENSE
-      - templates
 
 provides:
   airflow-coordinator:
