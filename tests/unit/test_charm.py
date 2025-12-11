@@ -1,0 +1,152 @@
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
+
+import dataclasses
+import json
+import unittest.mock
+
+import ops
+import ops.testing
+
+
+def test_non_leader_unit(context, state):
+    state = dataclasses.replace(state, leader=False)
+
+    app_status_before = state.app_status
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.app_status == app_status_before
+
+
+def test_missing_core_charm_relations(
+    context, state, all_required_relations, scheduler_relation, triggerer_relation
+):
+    all_required_relations.remove(scheduler_relation)
+    all_required_relations.remove(triggerer_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Missing integrations with: scheduler, triggerer"
+    )
+
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "missing_component",
+            },
+            {
+                "component": "triggerer",
+                "code": "missing_component",
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
+
+
+def test_invalid_core_charm_airflow_version(
+    context, state, all_required_relations, scheduler_data, scheduler_relation
+):
+    scheduler_data["airflow_version"] = "0.0.0"
+    modified_scheduler_relation = dataclasses.replace(
+        scheduler_relation, remote_app_data=scheduler_data
+    )
+
+    scheduler_relation_index = [
+        index
+        for index, relation in enumerate(all_required_relations)
+        if relation.remote_app_data.get("component") == "scheduler"
+    ][0]
+    del all_required_relations[scheduler_relation_index]
+    all_required_relations.append(modified_scheduler_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Integrated apps with mismatched airflow versions"
+    )
+
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "inconsistent_airflow_version",
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
+
+
+def test_invalid_core_charm_workload_image_hash(
+    context, state, all_required_relations, scheduler_data, scheduler_relation
+):
+    scheduler_data["workload_image_hash"] = "invalidhash"
+    modified_scheduler_relation = dataclasses.replace(
+        scheduler_relation, remote_app_data=scheduler_data
+    )
+
+    scheduler_relation_index = [
+        index
+        for index, relation in enumerate(all_required_relations)
+        if relation.remote_app_data.get("component") == "scheduler"
+    ][0]
+    del all_required_relations[scheduler_relation_index]
+    all_required_relations.append(modified_scheduler_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        "Integrated apps with mismatched workload image hashes"
+    )
+
+    failures = json.dumps(
+        [
+            {
+                "component": "scheduler",
+                "code": "inconsistent_workload_image_hash",
+            },
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {"validation-failures": failures}
+
+
+def test_happy_path(context, state):
+    with (
+        unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.config_template",
+            new_callable=unittest.mock.PropertyMock(return_value="mock_config"),
+        ),
+        unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.sensitive_config_values",
+            new_callable=unittest.mock.PropertyMock(return_value={"secret": "s3cret"}),
+        ),
+    ):
+        state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data["config-template"] == "mock_config"
+
+        assert state_out.get_secret(
+            id=relation.local_app_data["secret-sensitive-data"]
+        ).latest_content == {"sensitive-data": json.dumps({"secret": "s3cret"})}

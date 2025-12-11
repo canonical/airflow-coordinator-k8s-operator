@@ -1,0 +1,43 @@
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: airflow-coordinator-k8s
+title: Airflow Coordinator
+summary: A charm to coordinate Airflow Core charms
+description: |
+  A charm to coordinate Airflow Core charms.
+
+  Serves as a hub to gather cluster wide configurations, generate and disseminate
+  a unified Airflow configuration, and orchestrate pre-flight checks for the Airflow
+  cluster.
+
+links:
+  contact: Workflows Team <workflows-charmers@canonical.com>
+  # documentation: <insert documentation link>
+  issues:
+    - https://github.com/canonical/airflow-coordinator-k8s-operator/issues
+  source:
+    - https://github.com/canonical/airflow-coordinator-k8s-operator
+  # website: <insert charmhub listing link>
+
+# Documentation:
+# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+  files:
+    plugin: dump
+    source: .
+    stage:
+      - LICENSE
+
+provides:
+  airflow-coordinator:
+    interface: airflow_coordinator

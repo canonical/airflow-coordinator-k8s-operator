@@ -1,0 +1,16 @@
+[core]
+dags_folder = dags
+executor = LocalExecutor
+load_examples = False
+
+[database]
+sql_alchemy_conn = sqlite:///opt/airflow/airflow.database
+
+[api]
+port = 8080
+
+[logging]
+base_log_folder = logs
+
+; TODO: delete when actual template variables added
+; mock = {{ mock }}
