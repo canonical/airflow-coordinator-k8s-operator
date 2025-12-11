@@ -1,9 +1,104 @@
-# Copyright 2025 Canonical Ltd.
-# See LICENSE file for licensing details.
+"""Library to manage the relation provided by the Airflow Coordinator charm.
 
-# TODO: move code to officially generated charm lib once airflow-coordinator-k8s
-# is registered and first revision published on charmhub
-"""Temporary charm lib for Airflow Coordinator."""
+This library contains the Requires and Provides classes for handling the relation
+between the Airflow Coordinator charm and the Airflow core charms (Scheduler,
+API Server, Triggerer, DAG Processor).
+
+Since the Coordinator is expected to share sensitive data with related Airflow
+core charms, it is essential to prevent storing this data in plaintext in the
+relation databag. Thus, the library abstracts the transparent storage and
+retrieval of fields in pydantic models in the databag if plaintext, and in a
+juju secret if sensitive. We expand upon the implementation approach established
+in data_interfaces v1.
+
+### Requirer Charm
+
+The following presents an example usage of the AirflowCoordinatorRequires class:
+
+```python
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
+
+class AirflowCoreCharm(ops.CharmBase):
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+
+        self.requirer = airflow_coordinator.AirflowCoordinatorRequires(
+            self,
+            "airflow-coordinator", # relation endpoint
+            component="scheduler", # the component this charm represents
+            workload_container=self.unit.get_container("scheduler"),
+            callback=self.reconcile,
+        )
+
+    def reconcile(self, event) -> None:
+        # Determine current state of charm, what it should be, and how to get there
+```
+
+The AirflowCoordinatorRequires surfaces the following:
+1. `ready`: indicates whether the relation is ready and config available in databag
+2. `airflow_core_validation_failures`: all Airflow Core charm validation failures in the cluster.
+3. `validation_failure_messages`: all validation failures for this charm
+4. `missing_core_components_exist`: if any core charms are missing in the cluster
+5. `can_write_airflow_config`: all prerequisites met to be able to render and
+write airflow config file
+6. `write_airflow_config(filepath)`: renders and writes the airflow config in
+the workload container
+7. `can_write_kubernetes_executor_pod_spec`: all prerequisites met to be able
+to render and write the k8s executor pod spec
+8. `write_kubernetes_pod_spec(filepath)`: renders and write the k8s executor
+pod spec in the workload container
+
+The AirflowCoordinatorRequires will invoke the provided `callback` when:
+- the coordinator charm shares validation failures for all related core charms
+- the coordinator charm first shares the airflow config and/or k8s executor
+pod spec files
+- the coordinator charm updates anything that affects the airflow config and/or
+k8s executor pod spec files
+- the relation with the coordinator charm is broken
+
+### Provider Charm
+
+The following presents an example usage of the AirflowCoordinatorProvides class:
+
+```python
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
+
+class AirflowCoordinatorCharm(ops.CharmBase):
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+
+        self.requirer = airflow_coordinator.AirflowCoordinatorProvides(
+            self,
+            "airflow-coordinator", # relation endpoint
+            callback=self.reconcile,
+        )
+
+    def reconcile(self, event) -> None:
+        # Determine current state of charm, what it should be, and how to get there
+```
+
+The AirflowCoordinatorProvides surfaces the following:
+1. `missing_core_components`: a set of missing core charms that need to be added
+to the cluster
+2. `airflow_version_with_max_count`: the airflow version with the max count
+amongst the related core charms
+3. `workload_image_hash_with_max_count`: the workload image hash with the max
+count amongst the related core charms
+4. `are_airflow_version_consistent`: whether airflow versions consistent amongst
+all required related core charms
+4. `are_workload_image_hashes_consistent`: whether workload image hashes are
+consistent amongst all required related core charms
+5. `set_validation_errors()`: set any validation errors in databags of all
+related core charms
+6. `set_airflow_config()`: set the airflow config, k8s executor pod spec if
+available, and sensitive data in databag + juju secret to share with all related
+core charms
+
+The AirflowCoordinatorProvides will invoke the provided `callback` when:
+- a related core charm shares its metadata (including airflow version and workload
+image hash)
+- the relation with the core charm is broken
+"""
 
 import collections
 import enum
@@ -18,10 +113,24 @@ import ops
 import pydantic
 import typing_extensions
 
+# The unique Charmhub library identifier, never change it
+LIBID = "0a9814b72add4c5c85ca9eef647ab491"
+
+# Increment this major API version when introducing breaking changes
+LIBAPI = 0
+
+# Increment this PATCH version before using `charmcraft publish-lib` or reset
+# to 0 if you are raising the major API version
+LIBPATCH = 1
+
+# TODO: add your code here! Happy coding!
+
 logger = logging.getLogger(__name__)
 
 
 class AirflowCoreComponentEnum(str, enum.Enum):
+    """Enum to encapsulate the possible Airflow core component options."""
+
     SCHEDULER = "scheduler"
     API_SERVER = "api-server"
     TRIGGERER = "triggerer"
@@ -29,14 +138,16 @@ class AirflowCoreComponentEnum(str, enum.Enum):
 
 
 class AirflowCoreValidationErrorEnum(str, enum.Enum):
+    """Enum to encapsulate the possible validation error codes."""
+
     MISSING_COMPONENT = "missing_component"
     INCONSISTENT_AIRFLOW_VERSION = "inconsistent_airflow_version"
     INCONSISTENT_WORKLOAD_IMAGE_HASH = "inconsistent_workload_image_hash"
 
 
 METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE = {
-    AirflowCoreValidationErrorEnum.MISSING_COMPONENT: "Required component is missing in the cluster",
-    AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION: "Component has an airflow version inconsistent with the cluster",
+    AirflowCoreValidationErrorEnum.MISSING_COMPONENT: "Required component is missing in the cluster",  # noqa: E501
+    AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION: "Component has an airflow version inconsistent with the cluster",  # noqa: E501
     AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH: "Component has a workload image hash that is inconsistent with the cluster",  # noqa: E501
 }
 
@@ -590,7 +701,7 @@ class AirflowCoordinatorRequires(ops.Object):
 
     @property
     def airflow_core_validation_failures(self) -> list[str]:
-        """Airflow core charm validation failures."""
+        """Airflow core charm validation failures for all core charms in cluster."""
         return [failure.code for failure in self._requirer_handler.validation_failures]
 
     @property
@@ -613,7 +724,12 @@ class AirflowCoordinatorRequires(ops.Object):
 
     @property
     def can_write_airflow_config(self) -> bool:
-        """Indicate if it is safe to write the Airflow config to workload container."""
+        """Indicate if it is safe to write the Airflow config to workload container.
+
+        Ensures that the pebble is reachable in the workload container and that the
+        coordinator has shared relevant config data in the relation to be able to
+        render the Airflow config (and that there is a lack of validation errors).
+        """
         return (
             self._workload_container.can_connect()
             and self._charm.model.get_relation(self._relation_name)
@@ -640,7 +756,12 @@ class AirflowCoordinatorRequires(ops.Object):
 
     @property
     def can_write_kubernetes_executor_pod_spec(self) -> bool:
-        """Indicate if it is safe to write the k8s pod spec to the workload container."""
+        """Indicate if it is safe to write the k8s pod spec to the workload container.
+
+        Similar to the airflow config check, ensures the lack of validation errors +
+        pebble is reachable in the workload container + k8s executor pod spec present
+        in the relation.
+        """
         return (
             self._workload_container.can_connect()
             and self._charm.model.get_relation(self._relation_name)
@@ -688,7 +809,7 @@ class AirflowCoordinatorProvides(ops.Object):
 
     @property
     def missing_core_components(self) -> set[str]:
-        """Retrieve all missing core components."""
+        """Retrieve missing Airflow core components."""
         core_charms_metadata = self._provider_handler.core_charms_metadata
 
         return sorted(set(AirflowCoreComponentEnum) - set(core_charms_metadata.keys()))
@@ -715,7 +836,7 @@ class AirflowCoordinatorProvides(ops.Object):
 
     @property
     def are_airflow_versions_consistent(self) -> bool:
-        """Check validity of all related core charms."""
+        """Check that all related core charms have the same Airflow version."""
         return (
             len(
                 {
@@ -728,6 +849,7 @@ class AirflowCoordinatorProvides(ops.Object):
 
     @property
     def are_workload_image_hashes_consistent(self) -> bool:
+        """Check that all related core charms have the same workload image hash."""
         return (
             len(
                 {
@@ -739,7 +861,12 @@ class AirflowCoordinatorProvides(ops.Object):
         )
 
     def set_validation_errors(self) -> None:
-        """Set any core charm validation errors in relation databag."""
+        """Set any core charm validation errors in relation databag.
+
+        Will prioritize validation errors where core components are missing.
+        If no missing components, all mismatched airflow version and mismatched
+        workload image hash validation errors are populated in the databag.
+        """
         if self.missing_core_components:
             validation_error_messages = [
                 MetadataValidationError(
@@ -785,7 +912,14 @@ class AirflowCoordinatorProvides(ops.Object):
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
     ) -> None:
-        """Update config with related core charms."""
+        """Update config with related core charms.
+
+        Args:
+            config_template: Airflow config (jinja template string)
+            k8s_executor_pod_spec_template: (optional) K8s executor pod spec template
+            sensitive_data: sensitive data to render config of k8s executor pod
+                spec jinja templates with
+        """
         self._provider_handler.update_content(
             config_template=config_template,
             kubernetes_executor_pod_spec=k8s_executor_pod_spec_template,

@@ -9,7 +9,7 @@ import logging
 import pathlib
 import typing
 
-import charms.airflow_coordinator_k8s.v0.airflow_coordinator_temp as airflow_coordinator
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
 import pytest
@@ -116,7 +116,7 @@ def invalid_airflow_version_relation_data():
             [
                 {
                     "component": "scheduler",
-                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION,
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION,  # noqa: E501
                 },
             ],
         ),
@@ -130,7 +130,7 @@ def invalid_workload_image_hash_relation_data():
             [
                 {
                     "component": "scheduler",
-                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH,
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH,  # noqa: E501
                 },
             ],
         ),
@@ -477,7 +477,7 @@ class TestAirflowCoordinatorRequires:
             application_context.on.relation_changed(relation_mismatched_workload_image_hash),
             state_mismatched_airflow_versions,
         ) as manager:
-            state_out = manager.run()
+            manager.run()
             assert (
                 self.get_juju_log_line(
                     "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
@@ -521,9 +521,7 @@ class TestAirflowCoordinatorProvides:
             failure["component"]
             for failure in json.loads(missing_components_relation_data["validation-failures"])
         }
-        present_components = (
-            set(airflow_coordinator.AirflowCoreComponentEnum) - missing_components
-        )
+        present_components = set(airflow_coordinator.AirflowCoreComponentEnum) - missing_components
 
         state = generate_coordinator_state({component: {} for component in present_components})
 
@@ -560,9 +558,7 @@ class TestAirflowCoordinatorProvides:
         component_permutations = {
             component: {"airflow_version": "0.0.0"} for component in invalid_components
         }
-        for component in (
-            set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components
-        ):
+        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)
@@ -604,9 +600,7 @@ class TestAirflowCoordinatorProvides:
         component_permutations = {
             component: {"workload_image_hash": "0.0.0"} for component in invalid_components
         }
-        for component in (
-            set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components
-        ):
+        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)

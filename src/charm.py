@@ -6,10 +6,8 @@
 
 import logging
 
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
-
-# TODO: change to official charm lib name after charmhub registration + lib is published
-from charms.airflow_coordinator_k8s.v0.airflow_coordinator_temp import AirflowCoordinatorProvides
 
 import config_generator
 from constants import AIRFLOW_COORDINATOR_RELATION_NAME
@@ -24,7 +22,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         super().__init__(framework)
 
         self._config_generator = config_generator.AirflowConfigGenerator(self)
-        self._provider = AirflowCoordinatorProvides(
+        self._provider = airflow_coordinator.AirflowCoordinatorProvides(
             self, AIRFLOW_COORDINATOR_RELATION_NAME, callback=self.reconcile
         )
 
