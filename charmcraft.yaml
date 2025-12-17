@@ -41,3 +41,7 @@ parts:
 provides:
   airflow-coordinator:
     interface: airflow_coordinator
+
+requires:
+  postgres:
+    interface: postgresql_client

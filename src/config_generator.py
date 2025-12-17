@@ -4,8 +4,12 @@
 """Charm support for the Airflow config generation."""
 
 import logging
+import typing
 
 import ops
+
+import charm
+import constants
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +29,26 @@ class AirflowConfigGenerator:
         return config_template
 
     @property
+    def _sql_alchemy_connection_string(self) -> typing.Optional[str]:
+        """Create the sql alchemy connection string to the postgres database."""
+        postgres_relation_id = self._charm._database_requires.relations[0].id
+        relation_data = self._charm._database_requires.fetch_my_relation_data()[
+            postgres_relation_id
+        ]
+
+        endpoints = [
+            endpoint for endpoint in relation_data.get("endpoints", "").split(",") if endpoint
+        ]
+        if not endpoints:
+            raise charm.ExceptionWithStatusError(
+                "Missing endpoints from related postgres", ops.BlockedStatus
+            )
+
+        return f"postgresql+psycopg2://{relation_data.get('username')}:{relation_data.get('password')}@{endpoints[0]}/{constants.AIRFLOW_DATABASE_NAME}"
+
+    @property
     def sensitive_config_values(self) -> dict[str, str]:
         """All sensitive values that will be included in the Airflow config template."""
         return {
-            "mock": "data",  # TODO: replace with actual content
+            "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
         }

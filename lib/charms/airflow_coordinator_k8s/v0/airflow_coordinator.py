@@ -84,7 +84,7 @@ to the cluster
 amongst the related core charms
 3. `workload_image_hash_with_max_count`: the workload image hash with the max
 count amongst the related core charms
-4. `are_airflow_version_consistent`: whether airflow versions consistent amongst
+4. `are_airflow_versions_consistent`: whether airflow versions consistent amongst
 all required related core charms
 4. `are_workload_image_hashes_consistent`: whether workload image hashes are
 consistent amongst all required related core charms

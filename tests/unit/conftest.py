@@ -10,6 +10,18 @@ from charm import AirflowCoordinatorK8SOperatorCharm
 
 logger = logging.getLogger(__name__)
 
+POSTGRES_DATA = {
+    "username": "airflow_user",
+    "password": "airflow_password",
+    "endpoints": "airflow_host:airflow_port",
+    "read_only_endpoint": "airflow_read_only_host:airflow_read_only_port",
+}
+
+
+POSTGRES_SQL_ALCHEMY_STRING = (
+    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+)
+
 
 @pytest.fixture
 def airflow_coordinator_k8s_charm():
@@ -72,13 +84,20 @@ def dag_processor_relation(dag_processor_data):
 
 
 @pytest.fixture(scope="function")
+def postgres_relation():
+    return ops.testing.Relation("postgres", remote_app_data=POSTGRES_DATA)
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
+    postgres_relation,
     api_server_relation,
     scheduler_relation,
     triggerer_relation,
     dag_processor_relation,
 ):
     return [
+        postgres_relation,
         api_server_relation,
         scheduler_relation,
         triggerer_relation,
