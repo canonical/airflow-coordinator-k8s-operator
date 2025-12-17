@@ -652,6 +652,10 @@ class AirflowCoordinatorRequires(ops.Object):
         workload_container: ops.Container,
         callback: typing.Callable,
     ):
+        self._charm = charm
+        self._component = component
+        self._relation_name = relation_name
+
         if not charm.model.get_relation(relation_name):
             return
 
@@ -660,10 +664,6 @@ class AirflowCoordinatorRequires(ops.Object):
         self._requirer_handler = AirflowCoordinatorRequirerEventHandler(
             charm, relation_name, AirflowCoordinatorProviderModel
         )
-
-        self._charm = charm
-        self._component = component
-        self._relation_name = relation_name
 
         self._workload_container = workload_container
 
@@ -690,13 +690,16 @@ class AirflowCoordinatorRequires(ops.Object):
             self.framework.observe(event, callback)
 
     @property
-    def ready(self) -> bool:
+    def _ready(self) -> bool:
         """Indicates whether relation is ready, config available and workload can be started."""
-        return (
-            not self.missing_core_components_exist
-            and not self.validation_failure_messages
-            and self._requirer_handler.provider_content
-            and self._requirer_handler.provider_content.config_template
+        return all(
+            [
+                self._charm.model.get_relation(self._relation_name),
+                not self.missing_core_components_exist,
+                not self.validation_failure_messages,
+                self._requirer_handler.provider_content,
+                self._requirer_handler.provider_content.config_template,
+            ]
         )
 
     @property
@@ -730,11 +733,7 @@ class AirflowCoordinatorRequires(ops.Object):
         coordinator has shared relevant config data in the relation to be able to
         render the Airflow config (and that there is a lack of validation errors).
         """
-        return (
-            self._workload_container.can_connect()
-            and self._charm.model.get_relation(self._relation_name)
-            and self.ready
-        )
+        return self._workload_container.can_connect() and self._ready
 
     def write_airflow_config(self, config_path: str) -> None:
         """Render the Airflow config in the provided path in the workload container."""
@@ -764,8 +763,7 @@ class AirflowCoordinatorRequires(ops.Object):
         """
         return (
             self._workload_container.can_connect()
-            and self._charm.model.get_relation(self._relation_name)
-            and self.ready
+            and self._ready
             and self._requirer_handler.provider_content.kubernetes_executor_pod_spec
         )
 
