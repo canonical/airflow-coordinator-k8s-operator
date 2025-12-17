@@ -37,18 +37,19 @@ class AirflowConfigGenerator:
         ]
 
         endpoints = [
-            endpoint for endpoint in relation_data.get("endpoints", "").split(",") if endpoint
+            endpoint for endpoint in self._charm._database_requires.fetch_relation_field(postgres_relation_id, "endpoints").split(",") if endpoint
         ]
         if not endpoints:
-            raise charm.ExceptionWithStatusError(
-                "Missing endpoints from related postgres", ops.BlockedStatus
-            )
+            return None
 
         return f"postgresql+psycopg2://{relation_data.get('username')}:{relation_data.get('password')}@{endpoints[0]}/{constants.AIRFLOW_DATABASE_NAME}"
 
     @property
     def sensitive_config_values(self) -> dict[str, str]:
         """All sensitive values that will be included in the Airflow config template."""
+        if not self._sql_alchemy_connection_string:
+            return {}
+
         return {
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
         }

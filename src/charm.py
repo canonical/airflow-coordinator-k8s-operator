@@ -64,6 +64,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 "Waiting for airflow database to be created", ops.WaitingStatus
             )
 
+        if not self._config_generator._sql_alchemy_connection_string:
+            raise ExceptionWithStatusError(
+                "Waiting for database connection info from postgres", ops.WaitingStatus
+            )
+
         missing_core_components = self._config_provider.missing_core_components
         if missing_core_components:
             self._config_provider.set_validation_errors()
@@ -100,6 +105,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 sensitive_data=self._config_generator.sensitive_config_values,
             )
         except ExceptionWithStatusError as e:
+            logger.error(e)
             self.unit.status = e.status
             return
 
