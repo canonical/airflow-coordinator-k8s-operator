@@ -9,7 +9,7 @@ import unittest.mock
 
 import ops
 import ops.testing
-from conftest import POSTGRES_DATA, POSTGRES_SQL_ALCHEMY_STRING
+from conftest import POSTGRES_SQL_ALCHEMY_STRING
 
 
 def test_non_leader_unit(context, state):
@@ -158,16 +158,10 @@ def test_invalid_core_charm_workload_image_hash(
 
 
 def test_happy_path(context, state, postgres_relation):
-    with (
-        unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
-            ),
-        ),
-        unittest.mock.patch(
-            "charms.data_platform_libs.v0.data_interfaces.DatabaseRequires.fetch_my_relation_data",
-            return_value={postgres_relation.id: POSTGRES_DATA},
+    with unittest.mock.patch(
+        "config_generator.AirflowConfigGenerator.config_template",
+        new_callable=unittest.mock.PropertyMock(
+            return_value="mock_config: {{ sql_alchemy_connection_string }}"
         ),
     ):
         state_out = context.run(context.on.start(), state)

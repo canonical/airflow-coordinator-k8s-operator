@@ -54,6 +54,19 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         ]:
             self.framework.observe(event, self._reconcile)
 
+    @property
+    def _all_database_connection_details_present(self) -> None:
+        """Confirm if all database connection details present in postgres relation."""
+        if not self._database_requires.relations:
+            return False
+
+        postgres_relation_id = self._database_requires.relations[0].id
+
+        return all(
+            self._database_requires.fetch_relation_field(postgres_relation_id, field)
+            for field in ["username", "password", "endpoints", "database"]
+        )
+
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
@@ -64,7 +77,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 "Waiting for airflow database to be created", ops.WaitingStatus
             )
 
-        if not self._config_generator._sql_alchemy_connection_string:
+        if not self._all_database_connection_details_present:
             raise ExceptionWithStatusError(
                 "Waiting for database connection info from postgres", ops.WaitingStatus
             )

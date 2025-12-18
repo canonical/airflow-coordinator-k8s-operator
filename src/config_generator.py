@@ -7,8 +7,6 @@ import logging
 
 import ops
 
-import constants
-
 logger = logging.getLogger(__name__)
 
 
@@ -30,9 +28,16 @@ class AirflowConfigGenerator:
     def _sql_alchemy_connection_string(self) -> str:
         """Create the sql alchemy connection string to the postgres database."""
         postgres_relation_id = self._charm._database_requires.relations[0].id
-        relation_data = self._charm._database_requires.fetch_my_relation_data()[
-            postgres_relation_id
-        ]
+
+        username = self._charm._database_requires.fetch_relation_field(
+            postgres_relation_id, "username"
+        )
+        password = self._charm._database_requires.fetch_relation_field(
+            postgres_relation_id, "password"
+        )
+        database = self._charm._database_requires.fetch_relation_field(
+            postgres_relation_id, "database"
+        )
 
         endpoints = [
             endpoint
@@ -42,7 +47,7 @@ class AirflowConfigGenerator:
             if endpoint
         ]
 
-        return f"postgresql+psycopg2://{relation_data.get('username')}:{relation_data.get('password')}@{endpoints[0]}/{constants.AIRFLOW_DATABASE_NAME}"
+        return f"postgresql+psycopg2://{username}:{password}@{endpoints[0]}/{database}"
 
     @property
     def sensitive_config_values(self) -> dict[str, str]:

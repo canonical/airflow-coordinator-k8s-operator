@@ -566,25 +566,34 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.interface.relations:
             return
 
-        if not any([config_template, kubernetes_executor_pod_spec, sensitive_data]):
+        if not all([config_template, sensitive_data]):
             return
 
         if not self.charm.unit.is_leader():
             return
 
         try:
-            model = self.interface.build_model(
-                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
-            )
+            if self.interface.repository(self.relation.id, self.charm.app).get_data():
+                model = self.interface.build_model(
+                    self.relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                )
 
-            if config_template:
-                model.config_template = config_template
+                if config_template:
+                    model.config_template = config_template
 
-            if kubernetes_executor_pod_spec:
-                model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
+                if kubernetes_executor_pod_spec:
+                    model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
 
-            if sensitive_data:
-                model.sensitive_data = json.dumps(sensitive_data)
+                if sensitive_data:
+                    model.sensitive_data = json.dumps(sensitive_data)
+
+                model.validation_failures = None
+            else:
+                model = AirflowCoordinatorProviderModel(
+                    config_template=config_template,
+                    kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
+                    sensitive_data=json.dumps(sensitive_data),
+                )
         except pydantic.ValidationError:
             model = AirflowCoordinatorProviderModel(
                 config_template=config_template,
@@ -593,7 +602,7 @@ class AirflowCoordinatorProviderEventHandler(
             )
 
         for relation in self.interface.relations:
-            self.interface.write_model(relation.id, model)
+            self.interface.write_model(relation.id, model.model_copy(deep=True))
 
     def set_validation_errors(self, failures: list[MetadataValidationError]) -> None:
         """Update validation errors to send to related core charms."""
@@ -606,8 +615,15 @@ class AirflowCoordinatorProviderEventHandler(
         failures_serialized = json.dumps([failure.model_dump() for failure in failures])
 
         try:
-            model = self.interface.build_model(self.relation.id, AirflowCoordinatorProviderModel)
-            model.validation_failures = failures_serialized
+            if self.interface.repository(self.relation.id, self.charm.app).get_data():
+                model = self.interface.build_model(
+                    self.relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                )
+                model.validation_failures = failures_serialized
+            else:
+                model = AirflowCoordinatorProviderModel(
+                    validation_failures=failures_serialized,
+                )
         except pydantic.ValidationError:
             model = AirflowCoordinatorProviderModel(
                 validation_failures=failures_serialized,
@@ -733,7 +749,14 @@ class AirflowCoordinatorRequires(ops.Object):
         coordinator has shared relevant config data in the relation to be able to
         render the Airflow config (and that there is a lack of validation errors).
         """
-        return self._workload_container.can_connect() and self._ready
+        return all(
+            [
+                self._workload_container.can_connect(),
+                self._ready,
+                self._requirer_handler.provider_content,
+                self._requirer_handler.provider_content.sensitive_data,
+            ]
+        )
 
     def write_airflow_config(self, config_path: str) -> None:
         """Render the Airflow config in the provided path in the workload container."""
