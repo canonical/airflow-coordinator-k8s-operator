@@ -94,6 +94,12 @@ class MockCoreCharmCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus("Validation failures for this component exist")
             return
 
+        if self.config_requirer.can_write_airflow_config:
+            self.config_requirer.write_airflow_config(AIRFLOW_CONFIG_PATH)
+        else:
+            self.unit.status = ops.BlockedStatus("Waiting for config from coordinator")
+            return
+
         self.unit.status = ops.ActiveStatus()
 
     def _check_can_write_airflow_config(self, event: ops.ActionEvent) -> None:
@@ -115,7 +121,7 @@ class MockCoreCharmCharm(ops.CharmBase):
     def _get_airflow_config(self, event: ops.ActionEvent) -> None:
         """Get the Airflow config from the workload container."""
         try:
-            file = self.unit.get_container(CONTAINER_NAME).pull_path(
+            file = self.unit.get_container(CONTAINER_NAME).pull(
                 AIRFLOW_CONFIG_PATH, encoding="utf-8"
             )
 
@@ -149,7 +155,7 @@ class MockCoreCharmCharm(ops.CharmBase):
     def _on_get_kubernetes_executor_pod_spec(self, event: ops.ActionEvent) -> None:
         """Get the K8s executor pod spec from the workload container."""
         try:
-            file = self.unit.get_container(CONTAINER_NAME).pull_path(
+            file = self.unit.get_container(CONTAINER_NAME).pull(
                 K8S_EXECUTOR_POD_SPEC_PATH, encoding="utf-8"
             )
 

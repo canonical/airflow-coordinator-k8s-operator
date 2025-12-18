@@ -556,6 +556,10 @@ class AirflowCoordinatorProviderEventHandler(
 
         self._handle_event(event, repository, content)
 
+    @typing_extensions.override
+    def _on_secret_changed_event(self, _: ops.SecretChangedEvent) -> None:
+        pass
+
     def update_content(
         self,
         config_template: str = None,

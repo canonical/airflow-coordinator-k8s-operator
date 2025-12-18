@@ -22,7 +22,7 @@ def juju(request: pytest.FixtureRequest):
     if "JUJU_MODEL" in os.environ:
         juju = jubilant.Juju()
 
-        juju.add_model(os.environ["JUJU_MODEL"])
+        juju.add_model(os.environ["JUJU_MODEL"], config={"update-status-hook-interval": "10s"})
 
         yield juju
 
@@ -34,7 +34,7 @@ def juju(request: pytest.FixtureRequest):
 
         return
 
-    with jubilant.temp_model() as juju:
+    with jubilant.temp_model(config={"update-status-hook-interval": "10s"}) as juju:
         yield juju
 
         if request.session.testsfailed:
