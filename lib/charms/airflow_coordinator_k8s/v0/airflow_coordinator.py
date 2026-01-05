@@ -576,37 +576,36 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.charm.unit.is_leader():
             return
 
-        try:
-            if self.interface.repository(self.relation.id, self.charm.app).get_data():
-                model = self.interface.build_model(
-                    self.relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
-                )
+        for relation in self.interface.relations:
+            model = None
 
-                if config_template:
-                    model.config_template = config_template
+            if self.interface.repository(relation.id, self.charm.app).get_data():
+                try:
+                    model = self.interface.build_model(
+                        relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                    )
 
-                if kubernetes_executor_pod_spec:
-                    model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
+                    if config_template:
+                        model.config_template = config_template
 
-                if sensitive_data:
-                    model.sensitive_data = json.dumps(sensitive_data)
+                    if kubernetes_executor_pod_spec:
+                        model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
 
-                model.validation_failures = None
-            else:
+                    if sensitive_data:
+                        model.sensitive_data = json.dumps(sensitive_data)
+
+                    model.validation_failures = None
+                except pydantic.ValidationError:
+                    pass
+
+            if not model:
                 model = AirflowCoordinatorProviderModel(
                     config_template=config_template,
                     kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
                     sensitive_data=json.dumps(sensitive_data),
                 )
-        except pydantic.ValidationError:
-            model = AirflowCoordinatorProviderModel(
-                config_template=config_template,
-                kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
-                sensitive_data=json.dumps(sensitive_data),
-            )
 
-        for relation in self.interface.relations:
-            self.interface.write_model(relation.id, model.model_copy(deep=True))
+            self.interface.write_model(relation.id, model)
 
     def set_validation_errors(self, failures: list[MetadataValidationError]) -> None:
         """Update validation errors to send to related core charms."""
@@ -719,6 +718,7 @@ class AirflowCoordinatorRequires(ops.Object):
                 not self.validation_failure_messages,
                 self._requirer_handler.provider_content,
                 self._requirer_handler.provider_content.config_template,
+                self._requirer_handler.provider_content.sensitive_data,
             ]
         )
 
