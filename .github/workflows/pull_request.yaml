@@ -53,11 +53,19 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo snap install astral-uv --classic
-          uv tool install tox
+          sudo apt-get purge $(dpkg -l | grep -i docker | awk '{print $2}')
+          sudo apt-get purge containerd.io
+          sudo rm -r /run/containerd
+
+          sudo snap install concierge --classic
 
           sudo snap install just --classic
-          sudo snap install charmcraft --classic
+
+          sudo -E concierge prepare -p k8s --extra-snaps=astral-uv
+
+          sudo k8s kubectl config view --raw > ~/.kube/config
+
+          uv tool install tox
 
       - name: Run integration tests
         run: just integration
