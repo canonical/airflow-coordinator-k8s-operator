@@ -87,7 +87,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._config_provider.set_validation_errors()
 
             raise ExceptionWithStatusError(
-                f"Missing integrations with: {', '.join(missing_core_components)}",
+                f"Missing integrations with: {', '.join(sorted(missing_core_components))}",
                 ops.BlockedStatus,
             )
 

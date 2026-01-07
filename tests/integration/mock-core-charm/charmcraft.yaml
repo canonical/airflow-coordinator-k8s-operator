@@ -67,16 +67,12 @@ config:
       type: string
 
 actions:
-  check-can-write-airflow-config:
-    description: Checks if the Airflow config can be written to the workload container.
-  write-airflow-config:
-    description: Prompts the charm to render and write the Airflow config.
+  check-ready:
+    description: Checks if the relation with Airflow Coordinator is ready.
   get-airflow-config:
     description: Get the current Airflow config from the workload container.
   check-can-write-kubernetes-executor-pod-spec:
     description: Checks if the K8s executor pod spec can be written to the workload container.
-  write-kubernetes-executor-pod-spec:
-    description: Prompts the charm the render and write the K8s executor pod spec.
   get-kubernetes-executor-pod-spec:
     description: Get the current K8s executor pod spec from the workload container.
   get-relation-sensitive-data:
@@ -85,3 +81,5 @@ actions:
     description: Get this component's validation failure messages.
   get-all-validation-failures:
     description: Get validation failure messages for all Airflow core components.
+  clean-files:
+    description: Clean the airflow config and k8s executor pod spec files.

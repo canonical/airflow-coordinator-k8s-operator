@@ -4,7 +4,6 @@
 
 """A mock Airflow Core charm to be used in testing the Airflow Coordinator charm.."""
 
-import json
 import logging
 
 import ops
@@ -48,19 +47,12 @@ class MockCoreCharmCharm(ops.CharmBase):
         ]:
             self.framework.observe(event, self.log_event_and_set_status)
 
-        self.framework.observe(
-            self.on.check_can_write_airflow_config_action, self._check_can_write_airflow_config
-        )
-        self.framework.observe(self.on.write_airflow_config_action, self._write_airflow_config)
+        self.framework.observe(self.on.check_ready_action, self._check_ready)
         self.framework.observe(self.on.get_airflow_config_action, self._get_airflow_config)
 
         self.framework.observe(
             self.on.check_can_write_kubernetes_executor_pod_spec_action,
             self._check_can_write_kubernetes_executor_pod_spec,
-        )
-        self.framework.observe(
-            self.on.write_kubernetes_executor_pod_spec_action,
-            self._write_kubernetes_executor_pod_spec_action,
         )
         self.framework.observe(
             self.on.get_kubernetes_executor_pod_spec_action,
@@ -77,6 +69,8 @@ class MockCoreCharmCharm(ops.CharmBase):
         self.framework.observe(
             self.on.get_all_validation_failures_action, self._get_all_validation_failures
         )
+
+        self.framework.observe(self.on.clean_files_action, self._clean_files)
 
     def log_event_and_set_status(self, event) -> None:
         """Log info about the handled event + sets unit statuses based on relation data."""
@@ -102,21 +96,13 @@ class MockCoreCharmCharm(ops.CharmBase):
 
         self.unit.status = ops.ActiveStatus()
 
-    def _check_can_write_airflow_config(self, event: ops.ActionEvent) -> None:
+    def _check_ready(self, event: ops.ActionEvent) -> None:
         """Exposes whether relation indicates that the Airflow config can be written."""
         event.set_results(
             {
-                "can_write_airflow_config": self.config_requirer.can_write_airflow_config,
+                "ready": self.config_requirer._ready,
             },
         )
-
-    def _write_airflow_config(self, event: ops.ActionEvent) -> None:
-        """Write Airflow config into the workload container."""
-        try:
-            self.config_requirer.write_airflow_config(AIRFLOW_CONFIG_PATH)
-            event.set_results({})
-        except:  # noqa: E722
-            event.fail("Unable to write the Airflow config")
 
     def _get_airflow_config(self, event: ops.ActionEvent) -> None:
         """Get the Airflow config from the workload container."""
@@ -127,7 +113,7 @@ class MockCoreCharmCharm(ops.CharmBase):
 
             event.set_results(
                 {
-                    "airflow_config": file.read(),
+                    "airflow-config": file.read(),
                 },
             )
         except:  # noqa: E722
@@ -139,18 +125,9 @@ class MockCoreCharmCharm(ops.CharmBase):
 
         event.set_results(
             {
-                "can_write_kuberenetes_executor_pod_spec": pod_spec,
+                "can-write-kuberenetes-executor-pod-spec": pod_spec,
             },
         )
-
-    def _write_kubernetes_executor_pod_spec_action(self, event: ops.ActionEvent) -> None:
-        """Write K8s executor pod spec into the workload container."""
-        try:
-            self.config_requirer.write_kubernetes_executor_pod_spec(K8S_EXECUTOR_POD_SPEC_PATH)
-
-            event.set_results({})
-        except:  # noqa: E722
-            event.fail("Unable to write the K8s executor pod spec")
 
     def _on_get_kubernetes_executor_pod_spec(self, event: ops.ActionEvent) -> None:
         """Get the K8s executor pod spec from the workload container."""
@@ -161,7 +138,7 @@ class MockCoreCharmCharm(ops.CharmBase):
 
             event.set_results(
                 {
-                    "kubernetes_executor_pod_spec": file.read(),
+                    "kubernetes-executor-pod-spec": file.read(),
                 },
             )
         except:  # noqa: E722
@@ -183,7 +160,7 @@ class MockCoreCharmCharm(ops.CharmBase):
 
         event.set_results(
             {
-                "sensitive_data": json.loads(provider_content.sensitive_data),
+                "sensitive-data": provider_content.sensitive_data,
             },
         )
 
@@ -191,7 +168,7 @@ class MockCoreCharmCharm(ops.CharmBase):
         """Retrieve this component's validation failures shared by the coordinator."""
         event.set_results(
             {
-                "validation_failures": self.config_requirer.validation_failures,
+                "validation-failures": self.config_requirer.validation_failures,
             }
         )
 
@@ -199,9 +176,19 @@ class MockCoreCharmCharm(ops.CharmBase):
         """Retrieve all components' validation failures shared by the coordinator."""
         event.set_results(
             {
-                "all_validation_failures": self.config_requirer.airflow_core_validation_failures,
+                "all-validation-failures": self.config_requirer.airflow_core_validation_failures,
             },
         )
+
+    def _clean_files(self, event: ops.ActionEvent) -> None:
+        """Clean airflow config + k8s executor pod spec files."""
+        container = self.unit.get_container(CONTAINER_NAME)
+
+        # recursive=True to ensure rm -f in case file does not exist
+        container.remove_path(AIRFLOW_CONFIG_PATH, recursive=True)
+        container.remove_path(K8S_EXECUTOR_POD_SPEC_PATH, recursive=True)
+
+        event.set_results({})
 
 
 if __name__ == "__main__":  # pragma: nocover

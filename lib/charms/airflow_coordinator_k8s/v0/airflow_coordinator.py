@@ -560,7 +560,7 @@ class AirflowCoordinatorProviderEventHandler(
     def _on_secret_changed_event(self, _: ops.SecretChangedEvent) -> None:
         pass
 
-    def update_content(
+    def update_content(  # noqa: C901
         self,
         config_template: str = None,
         kubernetes_executor_pod_spec: str = None,
@@ -711,9 +711,12 @@ class AirflowCoordinatorRequires(ops.Object):
     @property
     def _ready(self) -> bool:
         """Indicates whether relation is ready, config available and workload can be started."""
+        if not self._charm.model.get_relation(self._relation_name):
+            return False
+
         return all(
-            [
-                self._charm.model.get_relation(self._relation_name),
+            condition
+            for condition in [
                 not self.missing_core_components_exist,
                 not self.validation_failure_messages,
                 self._requirer_handler.provider_content,
