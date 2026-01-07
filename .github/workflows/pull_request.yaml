@@ -57,6 +57,7 @@ jobs:
           uv tool install tox
 
           sudo snap install just --classic
+          sudo snap install charmcraft --classic
 
-      - name: Run unit tests
+      - name: Run integration tests
         run: just integration
