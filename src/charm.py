@@ -70,16 +70,18 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
-            raise ExceptionWithStatusError("Missing integration with postgres", ops.BlockedStatus)
+            raise ExceptionWithStatusError(
+                constants.MISSING_POSTGRES_INTEGRATION_MESSAGE, ops.BlockedStatus
+            )
 
         if not self._database_requires.is_resource_created():
             raise ExceptionWithStatusError(
-                "Waiting for airflow database to be created", ops.WaitingStatus
+                constants.WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE, ops.WaitingStatus
             )
 
         if not self._all_database_connection_details_present:
             raise ExceptionWithStatusError(
-                "Waiting for database connection info from postgres", ops.WaitingStatus
+                constants.WAITING_FOR_DATABASE_CONNECTION_MESSAGE, ops.WaitingStatus
             )
 
         missing_core_components = self._config_provider.missing_core_components
@@ -87,7 +89,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._config_provider.set_validation_errors()
 
             raise ExceptionWithStatusError(
-                f"Missing integrations with: {', '.join(sorted(missing_core_components))}",
+                constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                    missing_core_components=", ".join(missing_core_components)
+                ),
                 ops.BlockedStatus,
             )
 
@@ -95,14 +99,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._config_provider.set_validation_errors()
 
             raise ExceptionWithStatusError(
-                "Integrated apps with mismatched airflow versions", ops.BlockedStatus
+                constants.MISMATCHED_AIRFLOW_VERSIONS_MESSAGE, ops.BlockedStatus
             )
 
         if not self._config_provider.are_workload_image_hashes_consistent:
             self._config_provider.set_validation_errors()
 
             raise ExceptionWithStatusError(
-                "Integrated apps with mismatched workload image hashes", ops.BlockedStatus
+                constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
     def _reconcile(self, _) -> None:
