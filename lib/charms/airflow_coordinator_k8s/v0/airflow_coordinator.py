@@ -556,7 +556,11 @@ class AirflowCoordinatorProviderEventHandler(
 
         self._handle_event(event, repository, content)
 
-    def update_content(
+    @typing_extensions.override
+    def _on_secret_changed_event(self, _: ops.SecretChangedEvent) -> None:
+        pass
+
+    def update_content(  # noqa: C901
         self,
         config_template: str = None,
         kubernetes_executor_pod_spec: str = None,
@@ -566,33 +570,41 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.interface.relations:
             return
 
-        if not any([config_template, kubernetes_executor_pod_spec, sensitive_data]):
+        if not all([config_template, sensitive_data]):
             return
 
         if not self.charm.unit.is_leader():
             return
 
-        try:
-            model = self.interface.build_model(
-                self.relation.id, AirflowCoordinatorProviderModel, component=self.relation.app
-            )
-
-            if config_template:
-                model.config_template = config_template
-
-            if kubernetes_executor_pod_spec:
-                model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
-
-            if sensitive_data:
-                model.sensitive_data = json.dumps(sensitive_data)
-        except pydantic.ValidationError:
-            model = AirflowCoordinatorProviderModel(
-                config_template=config_template,
-                kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
-                sensitive_data=json.dumps(sensitive_data),
-            )
-
         for relation in self.interface.relations:
+            model = None
+
+            if self.interface.repository(relation.id, self.charm.app).get_data():
+                try:
+                    model = self.interface.build_model(
+                        relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                    )
+
+                    if config_template:
+                        model.config_template = config_template
+
+                    if kubernetes_executor_pod_spec:
+                        model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
+
+                    if sensitive_data:
+                        model.sensitive_data = json.dumps(sensitive_data)
+
+                    model.validation_failures = None
+                except pydantic.ValidationError:
+                    pass
+
+            if not model:
+                model = AirflowCoordinatorProviderModel(
+                    config_template=config_template,
+                    kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
+                    sensitive_data=json.dumps(sensitive_data),
+                )
+
             self.interface.write_model(relation.id, model)
 
     def set_validation_errors(self, failures: list[MetadataValidationError]) -> None:
@@ -605,15 +617,27 @@ class AirflowCoordinatorProviderEventHandler(
 
         failures_serialized = json.dumps([failure.model_dump() for failure in failures])
 
-        try:
-            model = self.interface.build_model(self.relation.id, AirflowCoordinatorProviderModel)
-            model.validation_failures = failures_serialized
-        except pydantic.ValidationError:
-            model = AirflowCoordinatorProviderModel(
-                validation_failures=failures_serialized,
-            )
-
         for relation in self.interface.relations:
+            model = None
+
+            if self.interface.repository(relation.id, self.charm.app).get_data():
+                try:
+                    model = self.interface.build_model(
+                        relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                    )
+
+                    model.validation_failures = failures_serialized
+                    model.config_template = None
+                    model.kubernetes_executor_pod_spec = None
+                    model.sensitive_data = None
+                except pydantic.ValidationError:
+                    pass
+
+            if not model:
+                model = AirflowCoordinatorProviderModel(
+                    validation_failures=failures_serialized,
+                )
+
             self.interface.write_model(relation.id, model)
 
     @property
@@ -692,13 +716,19 @@ class AirflowCoordinatorRequires(ops.Object):
     @property
     def _ready(self) -> bool:
         """Indicates whether relation is ready, config available and workload can be started."""
-        return all([
-            self._charm.model.get_relation(self._relation_name),
-            not self.missing_core_components_exist,
-            not self.validation_failure_messages,
-            self._requirer_handler.provider_content,
-            self._requirer_handler.provider_content.config_template,
-        ])
+        if not self._charm.model.get_relation(self._relation_name):
+            return False
+
+        return all(
+            condition
+            for condition in [
+                not self.missing_core_components_exist,
+                not self.validation_failure_messages,
+                self._requirer_handler.provider_content,
+                self._requirer_handler.provider_content.config_template,
+                self._requirer_handler.provider_content.sensitive_data,
+            ]
+        )
 
     @property
     def airflow_core_validation_failures(self) -> list[str]:
@@ -731,9 +761,13 @@ class AirflowCoordinatorRequires(ops.Object):
         coordinator has shared relevant config data in the relation to be able to
         render the Airflow config (and that there is a lack of validation errors).
         """
-        return (
-            self._workload_container.can_connect()
-            and self._ready
+        return all(
+            [
+                self._workload_container.can_connect(),
+                self._ready,
+                self._requirer_handler.provider_content,
+                self._requirer_handler.provider_content.sensitive_data,
+            ]
         )
 
     def write_airflow_config(self, config_path: str) -> None:
