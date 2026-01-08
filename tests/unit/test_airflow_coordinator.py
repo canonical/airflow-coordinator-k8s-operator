@@ -3,6 +3,7 @@
 
 """Tests for the Airflow Coordinator charm lib."""
 
+import abc
 import dataclasses
 import json
 import logging
@@ -37,8 +38,8 @@ class AirflowCoreApplicationCharm(ops.CharmBase):
         logger.info(f"§Requirer reacting to event: {type(event)}")
 
 
-class AirflowCoordianatorCharm(ops.CharmBase):
-    """Mock coordinator charm to enable testing Airflow Coordinator charm libs."""
+class AirflowCoordianatorCharmBase(ops.CharmBase):
+    """Mock coordinator charm base class to enable testing Airflow Coordinator charm libs."""
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -47,10 +48,35 @@ class AirflowCoordianatorCharm(ops.CharmBase):
             self,
             AIRFLOW_COORDINATOR_RELATION_INTERFACE,
             callback=self.reconcile,
+            dependencies_check_callable=self.dependencies_check_callable,
         )
 
     def reconcile(self, event) -> None:
         logger.info(f"§Provider reacting to event: {type(event)}")
+
+    @abc.abstractmethod
+    def dependencies_check_callable(self) -> bool:
+        pass
+
+
+class AirflowCoordianatorCharmReady(AirflowCoordianatorCharmBase):
+    """Mock coordinator charm that presents all dependencies available."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def dependencies_check_callable(self) -> bool:
+        return True
+
+
+class AirflowCoordianatorCharmWaiting(AirflowCoordianatorCharmBase):
+    """Mock coordinator charm that presents all dependencies as waiting."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def dependencies_check_callable(self) -> bool:
+        return False
 
 
 @pytest.fixture(scope="function")
@@ -178,7 +204,7 @@ def application_state(
 @pytest.fixture(scope="function")
 def coordinator_context():
     return ops.testing.Context(
-        charm_type=AirflowCoordianatorCharm,
+        charm_type=AirflowCoordianatorCharmReady,
         meta={
             "name": "airflow-coordinator-application",
             "provides": {
@@ -513,6 +539,32 @@ class TestAirflowCoordinatorProvides:
 
             for relation in state_out.relations:
                 assert "validation-failures" not in relation.local_app_data
+
+    def test_provider_methods_with_missing_required_dependencies(
+            self, coordinator_context
+    ):
+        state = generate_coordinator_state()
+
+        with unittest.mock.patch(
+            AirflowCoordianatorCharm.dependencies_check_callable, return_value=False,
+        ):
+            with coordinator_context(
+                coordinator_context.on.relation_changed(state.get_relations("airflow_coordinator")[0]),
+                state,
+            ) as manager:
+                state_out = manager.run()
+                assert (
+                    self.get_juju_log_line(
+                        "INFO", airflow_coordinator.AirflowCoreMetadataAvailableEvent
+                    )
+                    in coordinator_context.juju_log
+                )
+
+                manager.charm.provider.set_validation_errors()
+
+                for relation in state_out.relations:
+
+
 
     def test_provider_methods_when_missing_components(
         self, coordinator_context, missing_components_relation_data

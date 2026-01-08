@@ -42,7 +42,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self, constants.POSTGRES_RELATION_NAME, database_name=constants.AIRFLOW_DATABASE_NAME
         )
         self._config_provider = airflow_coordinator.AirflowCoordinatorProvides(
-            self, constants.AIRFLOW_COORDINATOR_RELATION_NAME, callback=self._reconcile
+            self,
+            constants.AIRFLOW_COORDINATOR_RELATION_NAME,
+            callback=self._reconcile,
+            dependencies_check_callable=self._required_dependencies_exist,
         )
 
         for event in [
@@ -65,6 +68,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return all(
             self._database_requires.fetch_relation_field(postgres_relation_id, field)
             for field in ["username", "password", "endpoints", "database"]
+        )
+
+    def _required_dependencies_exist(self) -> bool:
+        """Indicates if all required dependencies for the coordinator exist."""
+        # TODO: add k8s executor configurator relation here too
+        return all(
+            [
+                self.model.get_relation(constants.POSTGRES_RELATION_NAME),
+            ]
         )
 
     def _perform_checks(self) -> None:
