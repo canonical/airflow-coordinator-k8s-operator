@@ -617,22 +617,27 @@ class AirflowCoordinatorProviderEventHandler(
 
         failures_serialized = json.dumps([failure.model_dump() for failure in failures])
 
-        try:
-            if self.interface.repository(self.relation.id, self.charm.app).get_data():
-                model = self.interface.build_model(
-                    self.relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
-                )
-                model.validation_failures = failures_serialized
-            else:
+        for relation in self.interface.relations:
+            model = None
+
+            if self.interface.repository(relation.id, self.charm.app).get_data():
+                try:
+                    model = self.interface.build_model(
+                        relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
+                    )
+
+                    model.validation_failures = failures_serialized
+                    model.config_template = None
+                    model.kubernetes_executor_pod_spec = None
+                    model.sensitive_data = None
+                except pydantic.ValidationError:
+                    pass
+
+            if not model:
                 model = AirflowCoordinatorProviderModel(
                     validation_failures=failures_serialized,
                 )
-        except pydantic.ValidationError:
-            model = AirflowCoordinatorProviderModel(
-                validation_failures=failures_serialized,
-            )
 
-        for relation in self.interface.relations:
             self.interface.write_model(relation.id, model)
 
     @property
