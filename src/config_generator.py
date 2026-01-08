@@ -29,22 +29,16 @@ class AirflowConfigGenerator:
         """Create the sql alchemy connection string to the postgres database."""
         postgres_relation_id = self._charm._database_requires.relations[0].id
 
-        username = self._charm._database_requires.fetch_relation_field(
-            postgres_relation_id, "username"
-        )
-        password = self._charm._database_requires.fetch_relation_field(
-            postgres_relation_id, "password"
-        )
-        database = self._charm._database_requires.fetch_relation_field(
-            postgres_relation_id, "database"
-        )
+        postgres_relation_data = self._charm._database_requires.fetch_relation_data(
+            [postgres_relation_id]
+        )[postgres_relation_id]
+
+        username = postgres_relation_data["username"]
+        password = postgres_relation_data["password"]
+        database = postgres_relation_data["database"]
 
         endpoints = [
-            endpoint
-            for endpoint in self._charm._database_requires.fetch_relation_field(
-                postgres_relation_id, "endpoints"
-            ).split(",")
-            if endpoint
+            endpoint for endpoint in postgres_relation_data["endpoints"].split(",") if endpoint
         ]
 
         return f"postgresql+psycopg2://{username}:{password}@{endpoints[0]}/{database}"

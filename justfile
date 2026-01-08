@@ -12,7 +12,7 @@ clean-mock-charm-libs:
 
 # Run lint
 lint: (clean-mock-charm-libs)
-	uv tool run tox -e unit
+	uv tool run tox -e lint
 
 # Run format
 format: (clean-mock-charm-libs)
