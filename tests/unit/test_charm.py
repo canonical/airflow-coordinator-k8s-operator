@@ -11,6 +11,8 @@ import ops
 import ops.testing
 from conftest import POSTGRES_SQL_ALCHEMY_STRING
 
+import constants
+
 
 def test_non_leader_unit(context, state):
     state = dataclasses.replace(state, leader=False)
@@ -28,7 +30,9 @@ def test_missing_postgres_relation(context, state, all_required_relations, postg
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.BlockedStatus("Missing integration with postgres")
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+    )
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data == {}
@@ -43,7 +47,9 @@ def test_missing_postgres_relation_data(context, state, all_required_relations, 
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.WaitingStatus("Waiting for airflow database to be created")
+    assert state_out.unit_status == ops.WaitingStatus(
+        constants.WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE
+    )
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data == {}
@@ -59,7 +65,9 @@ def test_missing_core_charm_relations(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Missing integrations with: scheduler, triggerer"
+        constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+            missing_core_components="scheduler, triggerer"
+        )
     )
 
     failures = json.dumps(
@@ -102,7 +110,7 @@ def test_invalid_core_charm_airflow_version(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Integrated apps with mismatched airflow versions"
+        constants.MISMATCHED_AIRFLOW_VERSIONS_MESSAGE
     )
 
     failures = json.dumps(
@@ -141,7 +149,7 @@ def test_invalid_core_charm_workload_image_hash(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Integrated apps with mismatched workload image hashes"
+        constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE
     )
 
     failures = json.dumps(

@@ -7,3 +7,10 @@ AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 
 POSTGRES_RELATION_NAME = "postgres"
 AIRFLOW_DATABASE_NAME = "airflow"
+
+MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
+WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
+WAITING_FOR_DATABASE_CONNECTION_MESSAGE = "Waiting for database connection info from postgres"
+MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
+MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
+MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
