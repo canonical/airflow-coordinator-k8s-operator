@@ -270,3 +270,57 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
         "postgresql+psycopg2://"
         in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
     )
+
+
+def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
+    """Ensure breaking postgres relation halts cluster + recreating relation resumes cluster."""
+    logger.info("Breaking integration between coordinator <-> postgres")
+
+    juju.remove_relation("airflow-coordinator-k8s", "postgresql-k8s")
+
+    juju.wait(
+        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
+        and status.apps["airflow-coordinator-k8s"].app_status.message
+        == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+    )
+
+    for component in AIRFLOW_COMPONENTS:
+        assert juju.run(f"airflow-{component}-mock/0", "check-ready").results["ready"] == "False"
+
+    logger.info("Recreate integration between coordinator <-> postgres")
+
+    juju.integrate("airflow-coordinator-k8s", "postgresql-k8s")
+
+    juju.wait(jubilant.all_active)
+
+    airflow_configs, all_sensitive_data = set(), []
+
+    for component in AIRFLOW_COMPONENTS:
+        assert (
+            juju.run(
+                f"airflow-{component}-mock/0",
+                "check-ready",
+            ).results["ready"]
+            == "True"
+        )
+
+        config = juju.run(f"airflow-{component}-mock/0", "get-airflow-config").results[
+            "airflow-config"
+        ]
+        airflow_configs.add(config)
+
+        sensitive_data = juju.run(
+            f"airflow-{component}-mock/0",
+            "get-relation-sensitive-data",
+        ).results["sensitive-data"]
+
+        if sensitive_data not in all_sensitive_data:
+            all_sensitive_data.append(sensitive_data)
+
+    assert len(airflow_configs) == 1
+    assert len(all_sensitive_data) == 1
+
+    assert (
+        "postgresql+psycopg2://"
+        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
+    )

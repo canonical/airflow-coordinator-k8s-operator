@@ -7,6 +7,7 @@ import dataclasses
 import json
 import unittest.mock
 
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
 from conftest import POSTGRES_SQL_ALCHEMY_STRING
@@ -34,8 +35,19 @@ def test_missing_postgres_relation(context, state, all_required_relations, postg
         constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
     )
 
+    failures = json.dumps(
+        [
+            {
+                "component": "coordinator",
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES, # noqa: E501
+            }
+        ]
+    )
+
     for relation in state_out.get_relations("airflow-coordinator"):
-        assert relation.local_app_data == {}
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
 
 
 def test_missing_postgres_relation_data(context, state, all_required_relations, postgres_relation):
@@ -117,7 +129,7 @@ def test_invalid_core_charm_airflow_version(
         [
             {
                 "component": "scheduler",
-                "code": "inconsistent_airflow_version",
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION, # noqa: E501
             },
         ]
     )
@@ -156,7 +168,7 @@ def test_invalid_core_charm_workload_image_hash(
         [
             {
                 "component": "scheduler",
-                "code": "inconsistent_workload_image_hash",
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH, # noqa: E501
             },
         ]
     )

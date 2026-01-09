@@ -82,6 +82,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
+            self._config_provider.set_validation_errors()
+
             raise ExceptionWithStatusError(
                 constants.MISSING_POSTGRES_INTEGRATION_MESSAGE, ops.BlockedStatus
             )
