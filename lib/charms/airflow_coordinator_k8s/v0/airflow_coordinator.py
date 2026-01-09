@@ -157,7 +157,7 @@ METADATA_VALIDATION_ERROR_CODE_TO_MESSAGE = {
 class MetadataValidationError(pydantic.BaseModel):
     """Represents a failed validation for core component."""
 
-    component: AirflowCoreComponentEnum
+    component: AirflowCoreComponentEnum | typing.Literal["coordinator"] = pydantic.Field()
     code: AirflowCoreValidationErrorEnum
 
 

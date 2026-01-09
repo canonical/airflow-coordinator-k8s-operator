@@ -21,12 +21,14 @@ CORE_CHARM_METADATA = yaml.safe_load(
 
 AIRFLOW_VERSION = "3.1.0"
 WORKLOAD_IMAGE_HASH = "somehash"
-AIRFLOW_COMPONENTS = sorted([
-    "scheduler",
-    "api-server",
-    "triggerer",
-    "dag-processor",
-])
+AIRFLOW_COMPONENTS = sorted(
+    [
+        "scheduler",
+        "api-server",
+        "triggerer",
+        "dag-processor",
+    ]
+)
 
 
 def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path):
