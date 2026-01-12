@@ -4,12 +4,8 @@
 """Charm support for the Airflow config generation."""
 
 import logging
-import typing
 
 import ops
-
-import charm
-import constants
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +25,23 @@ class AirflowConfigGenerator:
         return config_template
 
     @property
-    def _sql_alchemy_connection_string(self) -> typing.Optional[str]:
+    def _sql_alchemy_connection_string(self) -> str:
         """Create the sql alchemy connection string to the postgres database."""
         postgres_relation_id = self._charm._database_requires.relations[0].id
-        relation_data = self._charm._database_requires.fetch_my_relation_data()[
-            postgres_relation_id
-        ]
+
+        postgres_relation_data = self._charm._database_requires.fetch_relation_data(
+            [postgres_relation_id]
+        )[postgres_relation_id]
+
+        username = postgres_relation_data["username"]
+        password = postgres_relation_data["password"]
+        database = postgres_relation_data["database"]
 
         endpoints = [
-            endpoint for endpoint in relation_data.get("endpoints", "").split(",") if endpoint
+            endpoint for endpoint in postgres_relation_data["endpoints"].split(",") if endpoint
         ]
-        if not endpoints:
-            raise charm.ExceptionWithStatusError(
-                "Missing endpoints from related postgres", ops.BlockedStatus
-            )
 
-        return f"postgresql+psycopg2://{relation_data.get('username')}:{relation_data.get('password')}@{endpoints[0]}/{constants.AIRFLOW_DATABASE_NAME}"
+        return f"postgresql+psycopg2://{username}:{password}@{endpoints[0]}/{database}"
 
     @property
     def sensitive_config_values(self) -> dict[str, str]:

@@ -1744,9 +1744,6 @@ class Data(ABC):
         """
         self._legacy_apply_on_fetch()
 
-        import pdb
-        pdb.set_trace()
-
         if not relation_name:
             relation_name = self.relation_name
 

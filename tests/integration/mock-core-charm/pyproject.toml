@@ -1,9 +1,9 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2025 Shayan
 # See LICENSE file for licensing details.
 
 [project]
-name = "airflow-coordinator-k8s-operator"
-version = "0.0"
+name = "mock-core-charm"
+version = "0.0.1"
 requires-python = ">=3.10"
 
 # Dependencies of the charm code
@@ -20,21 +20,7 @@ dependencies = [
 lint = [
     "ruff",
     "codespell",
-]
-format = [
-    "ruff",
-]
-# Dependencies of unit tests
-unit = [
-    "coverage[toml]",
-    "ops[testing]",
-    "pytest",
-]
-# Dependencies of integration tests
-integration = [
-    "jubilant",
-    "pytest",
-    "PyYAML",
+    "pyright",
 ]
 
 # Testing tools configuration
@@ -46,8 +32,7 @@ show_missing = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-asyncio_mode = "auto"
-addopts = "--tb=native --verbose --capture=no --log-cli-level=INFO"
+log_cli_level = "INFO"
 
 # Linting tools configuration
 [tool.ruff]
@@ -68,18 +53,14 @@ lint.ignore = [
     "D409",
     "D413",
 ]
-exclude = ["mock-core-charms/lib"]
 extend-exclude = ["__pycache__", "*.egg_info"]
 lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
 [tool.codespell]
-skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage,**/data_platform_libs"
+skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 
 [tool.pyright]
 include = ["src", "tests"]

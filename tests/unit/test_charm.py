@@ -9,7 +9,9 @@ import unittest.mock
 
 import ops
 import ops.testing
-from conftest import POSTGRES_DATA, POSTGRES_SQL_ALCHEMY_STRING
+from conftest import POSTGRES_SQL_ALCHEMY_STRING
+
+import constants
 
 
 def test_non_leader_unit(context, state):
@@ -28,7 +30,9 @@ def test_missing_postgres_relation(context, state, all_required_relations, postg
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.BlockedStatus("Missing integration with postgres")
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+    )
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data == {}
@@ -43,7 +47,9 @@ def test_missing_postgres_relation_data(context, state, all_required_relations, 
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.WaitingStatus("Waiting for airflow database to be created")
+    assert state_out.unit_status == ops.WaitingStatus(
+        constants.WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE
+    )
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data == {}
@@ -59,7 +65,9 @@ def test_missing_core_charm_relations(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Missing integrations with: scheduler, triggerer"
+        constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+            missing_core_components="scheduler, triggerer"
+        )
     )
 
     failures = json.dumps(
@@ -102,7 +110,7 @@ def test_invalid_core_charm_airflow_version(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Integrated apps with mismatched airflow versions"
+        constants.MISMATCHED_AIRFLOW_VERSIONS_MESSAGE
     )
 
     failures = json.dumps(
@@ -141,7 +149,7 @@ def test_invalid_core_charm_workload_image_hash(
     state_out = context.run(context.on.start(), state)
 
     assert state_out.unit_status == ops.BlockedStatus(
-        "Integrated apps with mismatched workload image hashes"
+        constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE
     )
 
     failures = json.dumps(
@@ -158,16 +166,10 @@ def test_invalid_core_charm_workload_image_hash(
 
 
 def test_happy_path(context, state, postgres_relation):
-    with (
-        unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
-            ),
-        ),
-        unittest.mock.patch(
-            "charms.data_platform_libs.v0.data_interfaces.DatabaseRequires.fetch_my_relation_data",
-            return_value={postgres_relation.id: POSTGRES_DATA},
+    with unittest.mock.patch(
+        "config_generator.AirflowConfigGenerator.config_template",
+        new_callable=unittest.mock.PropertyMock(
+            return_value="mock_config: {{ sql_alchemy_connection_string }}"
         ),
     ):
         state_out = context.run(context.on.start(), state)

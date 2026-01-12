@@ -1,0 +1,85 @@
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: mock-core-charm
+title: Mock Airflow Core charm
+summary: A mock Airflow Core charm to help test the Airflow Coordinator charm.
+description: |
+  A mock Airflow Core charm to help test the Airflow Coordinator charm.
+
+  The charm exposes various configuration options to help tweak input to the
+  relationship with Airflow Coordinator. Subsequently, it also observes incoming
+  data from Airflow Coordinator and provides testable indicators of various
+  issues and success patterns.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+  add-charm-libs:
+    plugin: dump
+    source: .
+    stage:
+      - lib
+
+containers:
+  workload:
+    resource: workload-container
+
+resources:
+  workload-container:
+    type: oci-image
+    description: Slim python ubuntu image
+    upstream-source: ubuntu/airflow:3.1-24.04_edge
+
+requires:
+  airflow-coordinator:
+    interface: airflow_coordinator
+    limit: 1
+
+config:
+  options:
+    component:
+      description: The Airflow core charm that is being mocked.
+      type: string
+      enum:
+        - scheduler
+        - api-server
+        - triggerer
+        - dag-processor
+
+    airflow_version:
+      description: |
+        Configures the Airflow version for the core charm that is being mocked.
+      default: "3.1.0"
+      type: string
+
+    workload_image_hash:
+      description: |
+        Configures the workload image hash for the core charm that is being mocked.
+      default: "somehash"
+      type: string
+
+actions:
+  check-ready:
+    description: Checks if the relation with Airflow Coordinator is ready.
+  get-airflow-config:
+    description: Get the current Airflow config from the workload container.
+  check-can-write-kubernetes-executor-pod-spec:
+    description: Checks if the K8s executor pod spec can be written to the workload container.
+  get-kubernetes-executor-pod-spec:
+    description: Get the current K8s executor pod spec from the workload container.
+  get-relation-sensitive-data:
+    description: Get the sensitive data used in the Airflow Coordinator relation.
+  get-component-validation-failures:
+    description: Get this component's validation failure messages.
+  get-all-validation-failures:
+    description: Get validation failure messages for all Airflow core components.
+  clean-files:
+    description: Clean the airflow config and k8s executor pod spec files.

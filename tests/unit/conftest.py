@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+import unittest.mock
 
 import ops.testing
 import pytest
@@ -13,8 +14,9 @@ logger = logging.getLogger(__name__)
 POSTGRES_DATA = {
     "username": "airflow_user",
     "password": "airflow_password",
+    "database": "airflow",
     "endpoints": "airflow_host:airflow_port",
-    "read_only_endpoint": "airflow_read_only_host:airflow_read_only_port",
+    "read_only_endpoints": "airflow_read_only_host:airflow_read_only_port",
 }
 
 
@@ -85,7 +87,18 @@ def dag_processor_relation(dag_processor_data):
 
 @pytest.fixture(scope="function")
 def postgres_relation():
-    return ops.testing.Relation("postgres", remote_app_data=POSTGRES_DATA)
+    relation = ops.testing.Relation("postgres", remote_app_data=POSTGRES_DATA)
+
+    def fetch_relation_field_side_effect(_, field):
+        return POSTGRES_DATA[field]
+
+    with (
+        unittest.mock.patch(
+            "charms.data_platform_libs.v0.data_interfaces.DatabaseRequires.fetch_relation_field",
+            side_effect=fetch_relation_field_side_effect,
+        ),
+    ):
+        yield relation
 
 
 @pytest.fixture(scope="function")

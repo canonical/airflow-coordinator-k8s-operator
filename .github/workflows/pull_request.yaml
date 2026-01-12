@@ -13,13 +13,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install uv and tox
+      - name: Install dependencies
         run: |
           sudo snap install astral-uv --classic
           uv tool install tox
 
+          sudo snap install just --classic
+
       - name: Run lint
-        run: uv tool run tox -e lint
+        run: just lint
 
   unit-tests:
     name: Unit tests
@@ -30,10 +32,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install uv and tox
+      - name: Install dependencies
         run: |
           sudo snap install astral-uv --classic
           uv tool install tox
 
+          sudo snap install just --classic
+
       - name: Run unit tests
-        run: uv tool run tox -e unit
+        run: just unit
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get purge $(dpkg -l | grep -i docker | awk '{print $2}')
+          sudo apt-get purge containerd.io
+          sudo rm -r /run/containerd
+
+          sudo snap install concierge --classic
+
+          sudo snap install just --classic
+
+          sudo -E concierge prepare -p k8s --extra-snaps=astral-uv
+
+          sudo k8s kubectl config view --raw > ~/.kube/config
+
+          uv tool install tox
+
+      - name: Run integration tests
+        run: just integration
