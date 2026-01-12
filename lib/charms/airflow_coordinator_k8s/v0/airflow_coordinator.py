@@ -683,6 +683,8 @@ class AirflowCoordinatorRequires(ops.Object):
         self._relation_name = relation_name
 
         if not charm.model.get_relation(relation_name):
+            self.framework.observe(charm.on[relation_name].broken, callback)
+
             return
 
         super().__init__(charm, relation_name)

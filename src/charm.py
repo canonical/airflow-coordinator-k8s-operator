@@ -64,14 +64,17 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return False
 
         postgres_relation_id = self._database_requires.relations[0].id
+        postgres_relation_data = self._database_requires.fetch_relation_data(
+            [postgres_relation_id]
+        )[postgres_relation_id]
 
         return all(
-            self._database_requires.fetch_relation_field(postgres_relation_id, field)
+            field in postgres_relation_data
             for field in ["username", "password", "endpoints", "database"]
         )
 
     def _required_dependencies_exist(self) -> bool:
-        """Indicates if all required dependencies for the coordinator exist."""
+        """Returns whether all required dependencies for the coordinator exist."""
         # TODO: add k8s executor configurator relation here too
         return all(
             [
