@@ -40,7 +40,7 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     # TODO: change postgres to 16/stable once released
     juju.deploy(
         "postgresql-k8s",
-        channel="16/beta",
+        channel="14/stable",
         trust=True,
     )
 
