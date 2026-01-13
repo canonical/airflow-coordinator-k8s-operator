@@ -629,9 +629,6 @@ class AirflowCoordinatorProviderEventHandler(
                     )
 
                     model.validation_failures = failures_serialized
-                    model.config_template = None
-                    model.kubernetes_executor_pod_spec = None
-                    model.sensitive_data = None
                 except pydantic.ValidationError:
                     pass
 
