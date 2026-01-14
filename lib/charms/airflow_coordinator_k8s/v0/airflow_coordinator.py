@@ -628,6 +628,11 @@ class AirflowCoordinatorProviderEventHandler(
                         relation.id, AirflowCoordinatorProviderModel, component=self.charm.app
                     )
 
+                    model.config_template = None
+                    model.kubernetes_executor_pod_spec = None
+                    # a truthy value assigned to avoid underlying secret from being deleted
+                    model.sensitive_data = "null"
+
                     model.validation_failures = failures_serialized
                 except pydantic.ValidationError:
                     pass
