@@ -773,6 +773,7 @@ class AirflowCoordinatorRequires(ops.Object):
                 self._workload_container.can_connect(),
                 self._ready,
                 self._requirer_handler.provider_content,
+                self._requirer_handler.provider_content.config_template,
                 self._requirer_handler.provider_content.sensitive_data,
             ]
         )
