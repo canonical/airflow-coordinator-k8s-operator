@@ -631,7 +631,7 @@ class AirflowCoordinatorProviderEventHandler(
                     model.config_template = None
                     model.kubernetes_executor_pod_spec = None
                     # a truthy value assigned to avoid underlying secret from being deleted
-                    model.sensitive_data = "null"
+                    model.sensitive_data = json.dumps({})
 
                     model.validation_failures = failures_serialized
                 except pydantic.ValidationError:
@@ -768,9 +768,11 @@ class AirflowCoordinatorRequires(ops.Object):
         coordinator has shared relevant config data in the relation to be able to
         render the Airflow config (and that there is a lack of validation errors).
         """
+        if not self._workload_container.can_connect():
+            return False
+
         return all(
-            [
-                self._workload_container.can_connect(),
+            condition for condition in [
                 self._ready,
                 self._requirer_handler.provider_content,
                 self._requirer_handler.provider_content.config_template,
