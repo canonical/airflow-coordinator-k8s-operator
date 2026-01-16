@@ -681,8 +681,8 @@ class AirflowCoordinatorRequires(ops.Object):
         callback: typing.Callable,
     ):
         self._charm = charm
-        self._component = component
         self._relation_name = relation_name
+        self._component = component
 
         if not charm.model.get_relation(relation_name):
             self._charm.framework.observe(charm.on[relation_name].relation_broken, callback)

@@ -39,7 +39,7 @@ def test_missing_postgres_relation(context, state, all_required_relations, postg
         [
             {
                 "component": "coordinator",
-                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES, # noqa: E501
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES,  # noqa: E501
             }
         ]
     )
@@ -129,7 +129,7 @@ def test_invalid_core_charm_airflow_version(
         [
             {
                 "component": "scheduler",
-                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION, # noqa: E501
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_AIRFLOW_VERSION,  # noqa: E501
             },
         ]
     )
@@ -168,7 +168,7 @@ def test_invalid_core_charm_workload_image_hash(
         [
             {
                 "component": "scheduler",
-                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH, # noqa: E501
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.INCONSISTENT_WORKLOAD_IMAGE_HASH,  # noqa: E501
             },
         ]
     )
