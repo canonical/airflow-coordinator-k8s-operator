@@ -10,6 +10,10 @@ default:
 clean-mock-charm-libs:
 	rm -rf tests/integration/mock-core-charm/lib
 
+# Build charm
+build-charm:
+	charmcraft pack
+
 # Run lint
 lint: (clean-mock-charm-libs)
 	uv tool run tox -e lint

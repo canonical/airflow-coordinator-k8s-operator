@@ -1,0 +1,8 @@
+name: airflow-coordinator-k8s
+summary: A charm to coordinate Airflow Core charms
+description: |
+  A charm to coordinate Airflow Core charms.
+
+  Serves as a hub to gather cluster wide configurations, generate and disseminate
+  a unified Airflow configuration, and orchestrate pre-flight checks for the Airflow
+  cluster.

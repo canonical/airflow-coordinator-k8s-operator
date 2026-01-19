@@ -1,0 +1,63 @@
+name: Release charm
+
+on:
+  push:
+    branches:
+      - track/**
+      - feature/add_release_ci
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    uses: ./.github/workflows/ci.yaml
+
+  integration-tests:
+    name: Integration tests
+    uses: ./.github/workflows/ci.yaml
+
+  collect-build-platforms:
+    name: Collect platforms for the charm build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Gather platforms
+        id: gather_platforms
+        run: |
+          echo "platforms=$(yq -o json '.platforms | keys | .[]' charmcraft.yaml)" >> "$GITHUB_OUTPUT"
+    outputs:
+      platforms: ${{ steps.gather_platforms.outputs.platforms }}
+
+  build:
+    name: Build charm
+    needs:
+      - collect-build-platforms
+    strategy:
+      matrix:
+        platform: ${{ fromJSON(needs.collect-build-platforms.outputs.platforms) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build charm
+        id: build_charm
+        run: |
+          just build-charm
+          echo "charm_file=$(ls *.charm | grep 'airflow-coordinator')" >> "$GITHUB_OUTPUT"
+    outputs:
+      charm_file: ${{ steps.build_charm.outputs.charm_file }}
+
+  # release:
+  #   name: Release charm
+  #   needs:
+  #     - unit-tests
+  #     - integration-tests
+  #     - build
+  #   uses: canonical/data-platform-workflows/.github/workflows/release_charm_edge.yaml@v41.0.0
+  #   with:
+  #     track: '3.1'
+  #     artifact-prefix: ${{ needs.build.outputs.charm_file }}
+  #   secrets:
+  #     charmhub-token: {{ secrets.CHARMHUB_TOKEN }}
