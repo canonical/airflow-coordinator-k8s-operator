@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def juju(request: pytest.FixtureRequest):
     """Create a temporary Juju model for running tests."""
     if "JUJU_MODEL" in os.environ:
-        juju = jubilant.Juju()
+        juju = jubilant.Juju(wait_timeout=10 * 60)
 
         juju.add_model(os.environ["JUJU_MODEL"], config={"update-status-hook-interval": "10s"})
 
@@ -35,6 +35,8 @@ def juju(request: pytest.FixtureRequest):
         return
 
     with jubilant.temp_model(config={"update-status-hook-interval": "10s"}) as juju:
+        juju.wait_timeout = 10 * 60
+
         yield juju
 
         if request.session.testsfailed:

@@ -42,7 +42,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self, constants.POSTGRES_RELATION_NAME, database_name=constants.AIRFLOW_DATABASE_NAME
         )
         self._config_provider = airflow_coordinator.AirflowCoordinatorProvides(
-            self, constants.AIRFLOW_COORDINATOR_RELATION_NAME, callback=self._reconcile
+            self,
+            constants.AIRFLOW_COORDINATOR_RELATION_NAME,
+            callback=self._reconcile,
+            dependencies_check_callable=self._required_dependencies_exist,
         )
 
         for event in [
@@ -61,15 +64,28 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return False
 
         postgres_relation_id = self._database_requires.relations[0].id
+        postgres_relation_data = self._database_requires.fetch_relation_data(
+            [postgres_relation_id]
+        )[postgres_relation_id]
 
         return all(
-            self._database_requires.fetch_relation_field(postgres_relation_id, field)
+            field in postgres_relation_data
             for field in ["username", "password", "endpoints", "database"]
+        )
+
+    def _required_dependencies_exist(self) -> bool:
+        """Returns whether all required dependencies for the coordinator exist."""
+        # TODO: add k8s executor configurator relation here too
+        return all(
+            [
+                self.model.get_relation(constants.POSTGRES_RELATION_NAME),
+            ]
         )
 
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
+            self._config_provider.set_validation_errors()
             raise ExceptionWithStatusError(
                 constants.MISSING_POSTGRES_INTEGRATION_MESSAGE, ops.BlockedStatus
             )

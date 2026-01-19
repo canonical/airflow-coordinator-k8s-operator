@@ -40,3 +40,16 @@ unit:
 # Clean up test environment
 clean: (clean-mock-charm-libs)
 	juju destroy-model --force --destroy-storage --no-prompt test
+
+# Get system state for debugging
+get-system-state:
+    #!/usr/bin/bash
+
+    df -h
+    echo "---"
+
+    juju status --model test --color --relations --storage
+    echo "---"
+
+    sudo k8s status
+    echo "---"

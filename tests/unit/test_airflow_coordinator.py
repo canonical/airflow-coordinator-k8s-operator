@@ -3,6 +3,7 @@
 
 """Tests for the Airflow Coordinator charm lib."""
 
+import abc
 import dataclasses
 import json
 import logging
@@ -37,8 +38,8 @@ class AirflowCoreApplicationCharm(ops.CharmBase):
         logger.info(f"§Requirer reacting to event: {type(event)}")
 
 
-class AirflowCoordianatorCharm(ops.CharmBase):
-    """Mock coordinator charm to enable testing Airflow Coordinator charm libs."""
+class AirflowCoordianatorCharmBase(ops.CharmBase):
+    """Mock coordinator charm base class to enable testing Airflow Coordinator charm libs."""
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -47,10 +48,35 @@ class AirflowCoordianatorCharm(ops.CharmBase):
             self,
             AIRFLOW_COORDINATOR_RELATION_INTERFACE,
             callback=self.reconcile,
+            dependencies_check_callable=self.dependencies_check_callable,
         )
 
     def reconcile(self, event) -> None:
         logger.info(f"§Provider reacting to event: {type(event)}")
+
+    @abc.abstractmethod
+    def dependencies_check_callable(self) -> bool:
+        pass
+
+
+class AirflowCoordianatorCharmReady(AirflowCoordianatorCharmBase):
+    """Mock coordinator charm that presents all dependencies available."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def dependencies_check_callable(self) -> bool:
+        return True
+
+
+class AirflowCoordianatorCharmWaiting(AirflowCoordianatorCharmBase):
+    """Mock coordinator charm that presents all dependencies as waiting."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+    def dependencies_check_callable(self) -> bool:
+        return False
 
 
 @pytest.fixture(scope="function")
@@ -138,6 +164,20 @@ def invalid_workload_image_hash_relation_data():
 
 
 @pytest.fixture(scope="function")
+def coordinator_awaiting_dependencies_relation_data():
+    return {
+        "validation-failures": json.dumps(
+            [
+                {
+                    "component": "coordinator",
+                    "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES,  # noqa: E501
+                },
+            ],
+        ),
+    }
+
+
+@pytest.fixture(scope="function")
 def valid_relation_data(coordinator_relation_secret):
     return {
         "config-template": "test-config: {{ secret }}",
@@ -178,7 +218,22 @@ def application_state(
 @pytest.fixture(scope="function")
 def coordinator_context():
     return ops.testing.Context(
-        charm_type=AirflowCoordianatorCharm,
+        charm_type=AirflowCoordianatorCharmReady,
+        meta={
+            "name": "airflow-coordinator-application",
+            "provides": {
+                "airflow-coordinator": {
+                    "interface": "airflow_coordinator",
+                },
+            },
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def coordinator_waiting_context():
+    return ops.testing.Context(
+        charm_type=AirflowCoordianatorCharmWaiting,
         meta={
             "name": "airflow-coordinator-application",
             "provides": {
@@ -252,6 +307,39 @@ class TestAirflowCoordinatorRequires:
             manager.run()
 
             assert len(manager.charm.requirer.validation_failure_messages) == 0
+
+    def test_missing_postgres_relation(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        coordinator_awaiting_dependencies_relation_data,
+    ):
+        relation_awaiting_dependencies = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data=coordinator_awaiting_dependencies_relation_data,
+        )
+        state_awaiting_dependencies = dataclasses.replace(
+            application_state, relations=[relation_awaiting_dependencies]
+        )
+
+        with application_context(
+            application_context.on.relation_changed(relation_awaiting_dependencies),
+            state_awaiting_dependencies,
+        ) as manager:
+            manager.run()
+
+            assert not manager.charm.requirer._ready
+
+            assert len(manager.charm.requirer.airflow_core_validation_failures) == 1
+            assert len(manager.charm.requirer.validation_failure_messages) == 1
+
+            assert sorted(manager.charm.requirer.validation_failure_messages) == [
+                failure["code"]
+                for failure in json.loads(
+                    coordinator_awaiting_dependencies_relation_data["validation-failures"]
+                )
+            ]
 
     def test_airflow_core_validation_failures_with_missing_components_failures(
         self,
@@ -513,6 +601,37 @@ class TestAirflowCoordinatorProvides:
 
             for relation in state_out.relations:
                 assert "validation-failures" not in relation.local_app_data
+
+    def test_provider_methods_with_missing_required_dependencies(
+        self, coordinator_waiting_context
+    ):
+        state = generate_coordinator_state()
+
+        with coordinator_waiting_context(
+            coordinator_waiting_context.on.relation_changed(
+                state.get_relations("airflow_coordinator")[0]
+            ),
+            state,
+        ) as manager:
+            state_out = manager.run()
+            assert (
+                self.get_juju_log_line(
+                    "INFO", airflow_coordinator.AirflowCoreMetadataAvailableEvent
+                )
+                in coordinator_waiting_context.juju_log
+            )
+
+            manager.charm.provider.set_validation_errors()
+
+            for relation in state_out.relations:
+                validation_failures = json.loads(relation.local_app_data["validation-failures"])
+
+                assert validation_failures == [
+                    {
+                        "component": "coordinator",
+                        "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES,  # noqa: E501
+                    }
+                ]
 
     def test_provider_methods_when_missing_components(
         self, coordinator_context, missing_components_relation_data

@@ -45,7 +45,7 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -69,3 +69,7 @@ jobs:
 
       - name: Run integration tests
         run: just integration
+
+      - name: Get system state (if failure)
+        if: failure()
+        run: just get-system-state
