@@ -45,7 +45,7 @@ jobs:
         run: |
           sudo snap install concierge --classic
 
-          sudo -E concierge prepare -p crafts
+          sudo -E concierge prepare -p crafts --extra-snaps=just
 
       - name: Build charm
         id: build_charm
