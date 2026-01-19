@@ -24,7 +24,7 @@ jobs:
         run: |
           platforms=$(yq -o json '.platforms | keys' charmcraft.yaml | sed "s/amd64/ubuntu-latest/g" | sed "s/arm64/ubuntu-24.04-arm/g")
 
-          echo $platforms >> "$GITHUB_OUTPUT"
+          echo "$platforms" >> "$GITHUB_OUTPUT"
     outputs:
       platforms: ${{ steps.gather_platforms.outputs.platforms }}
 
