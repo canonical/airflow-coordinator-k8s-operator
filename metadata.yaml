@@ -6,3 +6,11 @@ description: |
   Serves as a hub to gather cluster wide configurations, generate and disseminate
   a unified Airflow configuration, and orchestrate pre-flight checks for the Airflow
   cluster.
+
+provides:
+  airflow-coordinator:
+    interface: airflow_coordinator
+
+requires:
+  postgres:
+    interface: postgresql_client
