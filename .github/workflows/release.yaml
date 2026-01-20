@@ -57,7 +57,7 @@ jobs:
           echo "artifact_prefix=airflow-coordinator-platform-${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
 
       - name: Charmcraft logs
-        if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
+        if: ${{ success() || (failure() && steps.build_charm.outcome == 'failure') }}
         run: cat ~/.local/state/charmcraft/log/*
 
       - run: touch .empty
@@ -88,3 +88,5 @@ jobs:
       artifact-prefix: ${{ needs.build.outputs.artifact_prefix }}
     secrets:
       charmhub-token: {{ secrets.CHARMHUB_TOKEN }}
+    permissions:
+      content: write
