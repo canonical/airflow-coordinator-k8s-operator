@@ -32,3 +32,4 @@ jobs:
           origin-channel: ${{ inputs.origin-channel }}
           destination-channel: ${{ inputs.destination-channel }}
           tag-prefix: airflow-coordinator
+          charmcraft-channel: 3.x/stable
