@@ -9,7 +9,9 @@ import logging
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import ops
+from ops.pebble import LayerDict
 
+import command_executor
 import config_generator
 import constants
 
@@ -33,13 +35,22 @@ class ExceptionWithStatusError(Exception):
 class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     """Charm the application."""
 
+    _stored = ops.StoredState()
+
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
 
+        # StoredState to save state of db migration command
+        self._stored.set_default(db_migration_ran=False)
+
+        self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
+        self._command_executor = command_executor.CommandExecutor(self._container)
 
         self._database_requires = data_interfaces_v0.DatabaseRequires(
-            self, constants.POSTGRES_RELATION_NAME, database_name=constants.AIRFLOW_DATABASE_NAME
+            self,
+            constants.POSTGRES_RELATION_NAME,
+            database_name=constants.AIRFLOW_DATABASE_NAME,
         )
         self._config_provider = airflow_coordinator.AirflowCoordinatorProvides(
             self,
@@ -51,6 +62,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         for event in [
             self.on.start,
             self.on.update_status,
+            self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
@@ -73,6 +85,34 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             for field in ["username", "password", "endpoints", "database"]
         )
 
+    @property
+    def _airflow_coordinator_layer(self) -> LayerDict:
+        """Return the service Pebble layer."""
+        # Pebble layer to disable the default airflow service and health check from the rock.
+        # The rock runs "airflow standalone" by default with an "airflow-running" health check,
+        # but the coordinator only needs to run "airflow db migrate" and should not run
+        # the service.
+        layer: LayerDict = {
+            "summary": "Airflow coordinator layer",
+            "description": "Pebble layer for Airflow coordinator to run db migrations",
+            "services": {
+                "airflow": {
+                    "override": "merge",
+                    "startup": "disabled",
+                }
+            },
+            "checks": {
+                "airflow-running": {
+                    "override": "replace",
+                    "level": "alive",
+                    "exec": {
+                        "command": "/bin/true",
+                    },
+                }
+            },
+        }
+        return layer
+
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
         # TODO: add k8s executor configurator relation here too
@@ -84,6 +124,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
+        if not self._container.can_connect():
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
+            )
+
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
             self._config_provider.set_validation_errors()
             raise ExceptionWithStatusError(
@@ -125,13 +170,49 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
-    def _reconcile(self, _) -> None:
+    def _configure_pebble_layer(self) -> None:
+        """Configure the Pebble layer to disable the default airflow service.
+
+        The rock image runs 'airflow standalone' by default, but the coordinator
+        only needs to run 'airflow db migrate'. This method disables the default
+        service to ensure Airflow components are not running during migration.
+        """
+        self._container.add_layer(
+            "airflow-coordinator", self._airflow_coordinator_layer, combine=True
+        )
+        self._container.replan()
+
+    def _write_airflow_config(self) -> None:
+        """Write the Airflow configuration file to the container."""
+        airflow_coordinator.write_airflow_config(
+            self._container,
+            constants.AIRFLOW_CONFIG_PATH,
+            self._config_generator.config_template,
+            self._config_generator.sensitive_config_values,
+        )
+
+    def _run_db_migrate(self) -> None:
+        """Run database migration in the workload container."""
+        result = self._command_executor.run_db_migrate()
+        if not result.success:
+            raise ExceptionWithStatusError(
+                constants.DB_MIGRATION_FAILED_MESSAGE, ops.BlockedStatus
+            )
+
+    def _reconcile(self, event: ops.EventBase) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
         if not self.unit.is_leader():
             return
 
         try:
             self._perform_checks()
+            self._configure_pebble_layer()
+            self._write_airflow_config()
+
+            # Use StorageState to track if db migration has run before
+            if self._stored.db_migration_ran is False:
+                self._run_db_migrate()
+                self._stored.db_migration_ran = True
 
             self._config_provider.set_airflow_config(
                 self._config_generator.config_template,
@@ -140,6 +221,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         except ExceptionWithStatusError as e:
             logger.error(e)
             self.unit.status = e.status
+            return
+        except command_executor.CommandExecutionError as e:
+            logger.error(e)
+            self.unit.status = ops.BlockedStatus(e.message)
             return
 
         self.unit.status = ops.ActiveStatus()

@@ -128,6 +128,44 @@ LIBPATCH = 1
 logger = logging.getLogger(__name__)
 
 
+def write_airflow_config(
+    container: ops.Container,
+    config_path: str,
+    config_template: str,
+    sensitive_data: dict[str, str],
+) -> None:
+    """Render and write the Airflow config to a container.
+
+    This utility function can be used by both the coordinator charm (for db migrations)
+    and core charms (for their workload configuration).
+
+    Args:
+        container: The Pebble container to write the config to.
+        config_path: Path where the config file will be written.
+        config_template: The Jinja2 template string for the Airflow config.
+        sensitive_data: Dictionary of sensitive values to render in the template.
+
+    Raises:
+        RuntimeError: If unable to connect to the container or write the config.
+    """
+    if not container.can_connect():
+        raise RuntimeError("Cannot connect to workload container")
+
+    try:
+        config = jinja2.Environment().from_string(config_template).render(**sensitive_data)
+
+        container.push(
+            config_path,
+            config,
+            user="root",
+            group="root",
+            make_dirs=True,
+        )
+        logger.info(f"Successfully wrote Airflow config to {config_path}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to write Airflow config: {e}") from e
+
+
 class AirflowCoreComponentEnum(str, enum.Enum):
     """Enum to encapsulate the possible Airflow core component options."""
 
@@ -784,18 +822,11 @@ class AirflowCoordinatorRequires(ops.Object):
         """Render the Airflow config in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
 
-        config = (
-            jinja2.Environment()
-            .from_string(provider_content.config_template)
-            .render(**json.loads(provider_content.sensitive_data))
-        )
-
-        self._workload_container.push(
+        write_airflow_config(
+            self._workload_container,
             config_path,
-            config,
-            user="root",
-            group="root",
-            make_dirs=True,
+            provider_content.config_template,
+            json.loads(provider_content.sensitive_data),
         )
 
     @property

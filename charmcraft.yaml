@@ -42,6 +42,16 @@ provides:
   airflow-coordinator:
     interface: airflow_coordinator
 
+containers:
+  airflow-coordinator:
+    resource: airflow-coordinator-image
+
+resources:
+  airflow-coordinator-image:
+    type: oci-image
+    description: Airflow workload container for running commands
+    upstream-source: ubuntu/airflow:3.1-24.04_edge
+
 requires:
   postgres:
     interface: postgresql_client

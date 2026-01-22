@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 CORE_CHARM_METADATA = yaml.safe_load(
     pathlib.Path("tests/integration/mock-core-charm/charmcraft.yaml").read_text()
 )
-
+CHARMCRAFT_FILE = yaml.safe_load(pathlib.Path("./charmcraft.yaml").read_text())
+WORKLOAD_IMAGE = image_path = CHARMCRAFT_FILE["resources"]["airflow-coordinator-image"][
+    "upstream-source"
+]
 AIRFLOW_VERSION = "3.1.0"
 WORKLOAD_IMAGE_HASH = "somehash"
 AIRFLOW_COMPONENTS = sorted(
@@ -31,11 +34,17 @@ AIRFLOW_COMPONENTS = sorted(
 )
 
 
-def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path):
+def test_deploy(
+    juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path
+):
     """Deploy the charm under test."""
     logger.info("Deploying coordinator + postgresql")
 
-    juju.deploy(charm.resolve(), app="airflow-coordinator-k8s")
+    juju.deploy(
+        charm.resolve(),
+        app="airflow-coordinator-k8s",
+        resources={"airflow-coordinator-image": WORKLOAD_IMAGE},
+    )
 
     # TODO: change postgres to 16/stable once released
     juju.deploy(
@@ -74,9 +83,9 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
                 "workload_image_hash": WORKLOAD_IMAGE_HASH,
             },
             resources={
-                "workload-container": CORE_CHARM_METADATA["resources"]["workload-container"][
-                    "upstream-source"
-                ],
+                "workload-container": CORE_CHARM_METADATA["resources"][
+                    "workload-container"
+                ]["upstream-source"],
             },
         )
 
@@ -285,7 +294,10 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     )
 
     for component in AIRFLOW_COMPONENTS:
-        assert juju.run(f"airflow-{component}-mock/0", "check-ready").results["ready"] == "False"
+        assert (
+            juju.run(f"airflow-{component}-mock/0", "check-ready").results["ready"]
+            == "False"
+        )
 
     logger.info("Recreate integration between coordinator <-> postgres")
 
