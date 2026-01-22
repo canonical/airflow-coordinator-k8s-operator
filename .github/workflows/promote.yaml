@@ -1,0 +1,34 @@
+name: Promote charm
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin-channel:
+        description: Origin channel
+        required: true
+        default: 3.1/edge
+      destination-channel:
+        description: Destination channel
+        required: true
+        default: 3.1/beta
+
+concurrency:
+  group: promote-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  promote:
+    name: Promote charm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Promote charm
+        uses: canonical/charming-actions/release-charm@2.6.2
+        with:
+          credentials: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          origin-channel: ${{ inputs.origin-channel }}
+          destination-channel: ${{ inputs.destination-channel }}
+          tag-prefix: airflow-coordinator
