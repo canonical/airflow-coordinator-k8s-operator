@@ -23,20 +23,37 @@ jobs:
       - name: Gather platforms
         id: gather_platforms
         run: |
-          platforms=$(yq -o json -I 0 '.platforms | keys' charmcraft.yaml | sed "s/amd64/ubuntu-latest/g" | sed "s/arm64/ubuntu-24.04-arm/g")
+          platforms=$(yq -o json '.platforms | keys // ["amd64"]' charmcraft.yaml)
 
-          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+          for platform in $(jq -r '.[]' <<< "$platforms"); do
+              case "$platform" in
+                amd64) runner="ubuntu-latest" ;;
+                arm64) runner="ubuntu-24.04-arm" ;;
+                *)
+                  echo "Unsupported platform '$platform' in $cfg" >&2
+                  exit 1
+                  ;;
+              esac
+
+              architectures=$(jq \
+                --arg platform "$platform" \
+                --arg runner "$runner" \
+                '.include += [{"platform":$platform,"runner":$runner}]' \
+                <<< "$matrix")
+            done
+
+          echo "architectures=$architectures" >> "$GITHUB_OUTPUT"
     outputs:
-      platforms: ${{ steps.gather_platforms.outputs.platforms }}
+      matrix: ${{ steps.gather_platforms.outputs.architectures }}
 
   build:
     strategy:
       matrix:
-        platform: ${{ fromJSON(needs.collect-build-platforms.outputs.platforms) }}
-    name: 'Build charm | ${{ matrix.platform }}'
+        architectures: ${{ fromJSON(needs.collect-build-platforms.outputs.architectures) }}
+    name: 'Build charm | ${{ matrix.architectures.platform }}'
     needs:
       - collect-build-platforms
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.architectures.runner }}
     timeout-minutes: 60
     steps:
       - name: Checkout
