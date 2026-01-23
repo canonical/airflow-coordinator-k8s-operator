@@ -1,7 +1,16 @@
 # This file configures Charmcraft.
 # See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
 type: charm
+name: airflow-coordinator-k8s
 title: Airflow Coordinator
+summary: A charm to coordinate Airflow Core charms
+description: |
+  A charm to coordinate Airflow Core charms.
+
+  Serves as a hub to gather cluster wide configurations, generate and disseminate
+  a unified Airflow configuration, and orchestrate pre-flight checks for the Airflow
+  cluster.
+
 links:
   contact: Workflows Team <workflows-charmers@canonical.com>
   # documentation: <insert documentation link>
@@ -28,3 +37,11 @@ parts:
     source: .
     stage:
       - LICENSE
+
+provides:
+  airflow-coordinator:
+    interface: airflow_coordinator
+
+requires:
+  postgres:
+    interface: postgresql_client
