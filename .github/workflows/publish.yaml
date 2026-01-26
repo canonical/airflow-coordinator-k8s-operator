@@ -23,7 +23,7 @@ jobs:
       - name: Upload charm package
         uses: canonical/charming-actions/upload-charm@2.6.2
         with:
-          credentials: ${{ secrets.CHARMCRAFT_CREDENTIALS }}
+          credentials: ${{ secrets.CHARMHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           channel: 3.1/edge
           tag-prefix: airflow-coordinator
