@@ -98,6 +98,11 @@ def dag_processor_relation(dag_processor_data):
 
 
 @pytest.fixture(scope="function")
+def peer_relation():
+    return ops.testing.PeerRelation(constants.PEER_RELATION_NAME)
+
+
+@pytest.fixture(scope="function")
 def postgres_relation():
     relation = ops.testing.Relation("postgres", remote_app_data=POSTGRES_DATA)
 
@@ -120,6 +125,7 @@ def all_required_relations(
     scheduler_relation,
     triggerer_relation,
     dag_processor_relation,
+    peer_relation,
 ):
     return [
         postgres_relation,
@@ -127,6 +133,7 @@ def all_required_relations(
         scheduler_relation,
         triggerer_relation,
         dag_processor_relation,
+        peer_relation,
     ]
 
 

@@ -55,3 +55,7 @@ resources:
 requires:
   postgres:
     interface: postgresql_client
+
+peers:
+  coordinator-peers:
+    interface: coordinator_peers

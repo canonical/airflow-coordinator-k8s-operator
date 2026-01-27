@@ -141,7 +141,8 @@ def test_invalid_core_charm_airflow_version(
     scheduler_relation_index = [
         index
         for index, relation in enumerate(all_required_relations)
-        if relation.remote_app_data.get("component") == "scheduler"
+        if hasattr(relation, "remote_app_data")
+        and relation.remote_app_data.get("component") == "scheduler"
     ][0]
     del all_required_relations[scheduler_relation_index]
     all_required_relations.append(modified_scheduler_relation)
@@ -185,7 +186,8 @@ def test_invalid_core_charm_workload_image_hash(
     scheduler_relation_index = [
         index
         for index, relation in enumerate(all_required_relations)
-        if relation.remote_app_data.get("component") == "scheduler"
+        if hasattr(relation, "remote_app_data")
+        and relation.remote_app_data.get("component") == "scheduler"
     ][0]
     del all_required_relations[scheduler_relation_index]
     all_required_relations.append(modified_scheduler_relation)
@@ -212,9 +214,22 @@ def test_invalid_core_charm_workload_image_hash(
 
 
 def test_db_migration_does_not_run_on_state_true(
-    context, state, all_required_relations, mock_run_db_migrate, workload_container
+    context,
+    all_required_relations,
+    mock_run_db_migrate,
+    workload_container,
+    peer_relation,
 ):
-    """Verify that database migration does not happen when stored state is True."""
+    """Verify that database migration does not happen when peer relation state is True."""
+    # Update peer relation with migration already ran
+    peer_relation_with_state = dataclasses.replace(
+        peer_relation, local_app_data={"db_migration_ran": "true"}
+    )
+    relations = [
+        r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME
+    ]
+    relations.append(peer_relation_with_state)
+
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
@@ -223,20 +238,8 @@ def test_db_migration_does_not_run_on_state_true(
     ):
         state_in = ops.testing.State(
             leader=True,
-            containers={
-                workload_container: ops.testing.Container(
-                    name=workload_container,
-                    can_connect=True,
-                )
-            },
-            stored_states={
-                ops.testing.StoredState(
-                    "_stored",
-                    owner_path="AirflowCoordinatorK8SOperatorCharm",
-                    content={"db_migration_ran": True},
-                )
-            },
-            relations=all_required_relations,
+            containers=[workload_container],
+            relations=relations,
         )
 
         context.run(
@@ -248,9 +251,14 @@ def test_db_migration_does_not_run_on_state_true(
 
 
 def test_db_migration_runs_on_state_false(
-    context, state, all_required_relations, mock_run_db_migrate, workload_container
+    context,
+    all_required_relations,
+    mock_run_db_migrate,
+    workload_container,
+    peer_relation,
 ):
-    """Verify that database migration happens when stored state is False."""
+    """Verify that database migration happens when peer relation state is False."""
+    # Peer relation with no migration state (defaults to False)
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
@@ -259,19 +267,7 @@ def test_db_migration_runs_on_state_false(
     ):
         state_in = ops.testing.State(
             leader=True,
-            containers={
-                workload_container: ops.testing.Container(
-                    name=workload_container,
-                    can_connect=True,
-                )
-            },
-            stored_states={
-                ops.testing.StoredState(
-                    "_stored",
-                    owner_path="AirflowCoordinatorK8SOperatorCharm",
-                    content={"db_migration_ran": False},
-                )
-            },
+            containers=[workload_container],
             relations=all_required_relations,
         )
 

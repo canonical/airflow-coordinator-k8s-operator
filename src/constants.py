@@ -5,6 +5,8 @@
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 
+PEER_RELATION_NAME = "coordinator-peers"
+
 POSTGRES_RELATION_NAME = "postgres"
 AIRFLOW_DATABASE_NAME = "airflow"
 
@@ -19,6 +21,7 @@ WAITING_FOR_DATABASE_CONNECTION_MESSAGE = (
     "Waiting for database connection info from postgres"
 )
 WAITING_FOR_CONTAINER_MESSAGE = "Waiting for workload container"
+WAITING_FOR_PEER_RELATION_MESSAGE = "Waiting for peer relation"
 DB_MIGRATION_FAILED_MESSAGE = "Database migration failed"
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = (

@@ -35,13 +35,8 @@ class ExceptionWithStatusError(Exception):
 class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     """Charm the application."""
 
-    _stored = ops.StoredState()
-
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-
-        # StoredState to save state of db migration command
-        self._stored.set_default(db_migration_ran=False)
 
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
@@ -112,6 +107,31 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             },
         }
         return layer
+
+    @property
+    def _peer_relation(self) -> ops.Relation:
+        """Return the peer relation.
+
+        Raises:
+            ExceptionWithStatusError: If peer relation is not available.
+        """
+        peer_relation = self.model.get_relation(constants.PEER_RELATION_NAME)
+        if not peer_relation:
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_PEER_RELATION_MESSAGE, ops.WaitingStatus
+            )
+        return peer_relation
+
+    @property
+    def _db_migration_ran(self) -> bool:
+        """Check if database migration has been run."""
+        return self._peer_relation.data[self.app].get("db_migration_ran") == "true"
+
+    @_db_migration_ran.setter
+    def _db_migration_ran(self, value: bool) -> None:
+        """Set database migration state."""
+        # We need to cast the bool to str, Juju relation data bags can only store strings
+        self._peer_relation.data[self.app]["db_migration_ran"] = str(value).lower()
 
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
@@ -209,10 +229,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._configure_pebble_layer()
             self._write_airflow_config()
 
-            # Use StorageState to track if db migration has run before
-            if self._stored.db_migration_ran is False:
+            # Use peer relation data to track if db migration has run
+            # TODO: once we have upgrade logic, we'll need to change the
+            # conditions under which this state will be True/False.
+            if not self._db_migration_ran:
                 self._run_db_migrate()
-                self._stored.db_migration_ran = True
+                self._db_migration_ran = True
 
             self._config_provider.set_airflow_config(
                 self._config_generator.config_template,
