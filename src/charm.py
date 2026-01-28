@@ -48,12 +48,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             dependencies_check_callable=self._required_dependencies_exist,
         )
 
+        # TODO: confirm if we can observe custom config secret changed events
         for event in [
             self.on.start,
-            self.on.update_status,
+            self.on.config_changed,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
+            self.on.update_status,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -84,6 +86,23 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
+        if not self.config:
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_CHARM_SETUP_MESSAGE, ops.WaitingStatus
+            )
+
+        if self.config[constants.SENSITIVE_CUSTOM_CONFIG]:
+            try:
+                self.model.get_secret(id=self.config[constants.SENSITIVE_CUSTOM_CONFIG], label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL)
+            except ops.ModelError:
+                raise ExceptionWithStatusError(
+                    constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
+                )
+            except ops.SecretNotFoundError:
+                raise ExceptionWithStatusError(
+                    constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
+                )
+
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
             self._config_provider.set_validation_errors()
             raise ExceptionWithStatusError(
@@ -123,6 +142,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             raise ExceptionWithStatusError(
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
+            )
+
+        if self._config_generator.do_custom_configs_overlap:
+            raise ExceptionWithStatusError(
+                constants.CUSTOM_CONFIG_OVERLAP_MESSAGE, ops.BlockedStatus
+            )
+
+        if self._config_generator.custom_configs_have_blacklisted_keys:
+            raise ExceptionWithStatusError(
+                constants.CUSTOM_CONFIG_HAS_BLACKLIST_KEY, ops.BlockedStatus
             )
 
     def _reconcile(self, _) -> None:

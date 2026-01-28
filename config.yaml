@@ -1,0 +1,8 @@
+config:
+  options:
+    sensitive-airflow-configuration-secret:
+      type: secret
+      description: URI for secret that contains the user specified Airflow config with sensitive values
+    custom-airflow-configuration:
+      type: string
+      description: Custom Airflow config without sensitive values
