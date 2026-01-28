@@ -7,6 +7,8 @@ import unittest.mock
 import ops.testing
 import pytest
 
+import command_executor
+import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
 
 logger = logging.getLogger(__name__)
@@ -20,9 +22,7 @@ POSTGRES_DATA = {
 }
 
 
-POSTGRES_SQL_ALCHEMY_STRING = (
-    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
-)
+POSTGRES_SQL_ALCHEMY_STRING = "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
 
 
 @pytest.fixture
@@ -35,8 +35,18 @@ def context(airflow_coordinator_k8s_charm):
     return ops.testing.Context(charm_type=airflow_coordinator_k8s_charm)
 
 
+@pytest.fixture(scope="function")
+def workload_container():
+    return ops.testing.Container(
+        constants.WORKLOAD_CONTAINER_NAME,
+        can_connect=True,
+    )
+
+
 def core_component_metadata(
-    component: str, airflow_version: str = "3.1.0", workload_image_hash: str = "somehash"
+    component: str,
+    airflow_version: str = "3.1.0",
+    workload_image_hash: str = "somehash",
 ) -> dict[str, str]:
     return {
         "airflow_version": airflow_version,
@@ -82,7 +92,14 @@ def triggerer_relation(triggerer_data):
 
 @pytest.fixture(scope="function")
 def dag_processor_relation(dag_processor_data):
-    return ops.testing.Relation("airflow-coordinator", remote_app_data=dag_processor_data)
+    return ops.testing.Relation(
+        "airflow-coordinator", remote_app_data=dag_processor_data
+    )
+
+
+@pytest.fixture(scope="function")
+def peer_relation():
+    return ops.testing.PeerRelation(constants.PEER_RELATION_NAME)
 
 
 @pytest.fixture(scope="function")
@@ -108,6 +125,7 @@ def all_required_relations(
     scheduler_relation,
     triggerer_relation,
     dag_processor_relation,
+    peer_relation,
 ):
     return [
         postgres_relation,
@@ -115,12 +133,38 @@ def all_required_relations(
         scheduler_relation,
         triggerer_relation,
         dag_processor_relation,
+        peer_relation,
     ]
 
 
+@pytest.fixture
+def mock_run_db_migrate():
+    """Mock the charm's _run_db_migrate method."""
+    with unittest.mock.patch.object(
+        AirflowCoordinatorK8SOperatorCharm,
+        "_run_db_migrate",
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture(scope="function")
-def state(all_required_relations):
+def mock_command_executor():
+    """Mock the command executor to avoid actual container operations."""
+    with unittest.mock.patch.object(
+        command_executor.CommandExecutor, "run_db_migrate"
+    ) as mock_run_db_migrate:
+        mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", stderr="", return_code=0
+        )
+        yield {
+            "run_db_migrate": mock_run_db_migrate,
+        }
+
+
+@pytest.fixture(scope="function")
+def state(all_required_relations, workload_container, mock_command_executor):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
+        containers=[workload_container],
     )
