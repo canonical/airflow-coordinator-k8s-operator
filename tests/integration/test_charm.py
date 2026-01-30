@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 CORE_CHARM_METADATA = yaml.safe_load(
     pathlib.Path("tests/integration/mock-core-charm/charmcraft.yaml").read_text()
 )
-
+CHARMCRAFT_FILE = yaml.safe_load(pathlib.Path("./charmcraft.yaml").read_text())
+WORKLOAD_IMAGE = image_path = CHARMCRAFT_FILE["resources"]["airflow-coordinator-image"][
+    "upstream-source"
+]
 AIRFLOW_VERSION = "3.1.0"
 WORKLOAD_IMAGE_HASH = "somehash"
 AIRFLOW_COMPONENTS = sorted(
@@ -35,7 +38,11 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     """Deploy the charm under test."""
     logger.info("Deploying coordinator + postgresql")
 
-    juju.deploy(charm.resolve(), app="airflow-coordinator-k8s")
+    juju.deploy(
+        charm.resolve(),
+        app="airflow-coordinator-k8s",
+        resources={"airflow-coordinator-image": WORKLOAD_IMAGE},
+    )
 
     # TODO: change postgres to 16/stable once released
     juju.deploy(

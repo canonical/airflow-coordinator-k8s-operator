@@ -7,6 +7,7 @@ import unittest.mock
 import ops.testing
 import pytest
 
+import command_executor
 import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
 
@@ -84,8 +85,18 @@ def context(airflow_coordinator_k8s_charm):
     )
 
 
+@pytest.fixture(scope="function")
+def workload_container():
+    return ops.testing.Container(
+        constants.WORKLOAD_CONTAINER_NAME,
+        can_connect=True,
+    )
+
+
 def core_component_metadata(
-    component: str, airflow_version: str = "3.1.0", workload_image_hash: str = "somehash"
+    component: str,
+    airflow_version: str = "3.1.0",
+    workload_image_hash: str = "somehash",
 ) -> dict[str, str]:
     return {
         "airflow_version": airflow_version,
@@ -135,6 +146,11 @@ def dag_processor_relation(dag_processor_data):
 
 
 @pytest.fixture(scope="function")
+def peer_relation():
+    return ops.testing.PeerRelation(constants.PEER_RELATION_NAME)
+
+
+@pytest.fixture(scope="function")
 def postgres_relation():
     relation = ops.testing.Relation("postgres", remote_app_data=POSTGRES_DATA)
 
@@ -157,6 +173,7 @@ def all_required_relations(
     scheduler_relation,
     triggerer_relation,
     dag_processor_relation,
+    peer_relation,
 ):
     return [
         postgres_relation,
@@ -164,14 +181,40 @@ def all_required_relations(
         scheduler_relation,
         triggerer_relation,
         dag_processor_relation,
+        peer_relation,
     ]
 
 
+@pytest.fixture
+def mock_run_db_migrate():
+    """Mock the charm's _run_db_migrate method."""
+    with unittest.mock.patch.object(
+        AirflowCoordinatorK8SOperatorCharm,
+        "_run_db_migrate",
+    ) as mock:
+        yield mock
+
+
 @pytest.fixture(scope="function")
-def state(all_required_relations):
+def mock_command_executor():
+    """Mock the command executor to avoid actual container operations."""
+    with unittest.mock.patch.object(
+        command_executor.CommandExecutor, "run_db_migrate"
+    ) as mock_run_db_migrate:
+        mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", stderr="", return_code=0
+        )
+        yield {
+            "run_db_migrate": mock_run_db_migrate,
+        }
+
+
+@pytest.fixture(scope="function")
+def state(all_required_relations, workload_container, mock_command_executor):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
+        containers=[workload_container],
     )
 
 
@@ -185,13 +228,14 @@ def custom_config_secret():
 
 
 @pytest.fixture(scope="function")
-def state_with_custom_config(custom_config_secret, all_required_relations):
+def state_with_custom_config(custom_config_secret, all_required_relations, workload_container):
     return ops.testing.State(
         leader=True,
         config={
             constants.CUSTOM_CONFIG: CUSTOM_CONFIG_NON_SENSITIVE,
             constants.SENSITIVE_CUSTOM_CONFIG: custom_config_secret.id,
         },
+        containers=[workload_container],
         relations=all_required_relations,
         secrets=[custom_config_secret],
     )
