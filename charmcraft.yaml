@@ -45,3 +45,12 @@ provides:
 requires:
   postgres:
     interface: postgresql_client
+
+config:
+  options:
+    sensitive_airflow_configuration_secret:
+      type: secret
+      description: "URI for secret that contains the user specified Airflow config with sensitive values"
+    custom_airflow_configuration:
+      type: string
+      description: "Custom Airflow config without sensitive values"

@@ -3,16 +3,29 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+import builtins
+import configparser
+import copy
 import dataclasses
 import json
+import logging
+import pathlib
 import unittest.mock
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
-from conftest import POSTGRES_SQL_ALCHEMY_STRING
+from conftest import (
+    CONFIG_TEMPLATED,
+    CUSTOM_CONFIG_SENSITIVE,
+    MERGED_CONFIG_TEMPLATE,
+    SENSITIVE_DATA,
+    SENSITIVE_DATA_WITH_CUSTOM_CONFIGS,
+)
 
 import constants
+
+logger = logging.getLogger(__name__)
 
 
 def test_non_leader_unit(context, state):
@@ -177,6 +190,130 @@ def test_invalid_core_charm_workload_image_hash(
         assert relation.local_app_data == {"validation-failures": failures}
 
 
+def test_sensitive_custom_config_secret_not_found(context, state_with_custom_config):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.SENSITIVE_CUSTOM_CONFIG: "secret:oi6jb9z58hre99w63v0g"})
+
+    state_with_custom_config = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.CUSTOM_CONFIG_SECRET_NOT_FOUND)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_sensitive_custom_config_secret_unauthorized(context, state_with_custom_config):
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with (
+        unittest.mock.patch(
+            "builtins.open",
+            side_effect=_mock_open,
+        ),
+        unittest.mock.patch(
+            "ops.model.Model.get_secret", side_effect=ops.model.ModelError("unauthorized")
+        ),
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_custom_airflow_config_with_overlap_keys(context, state_with_custom_config):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.CUSTOM_CONFIG: CUSTOM_CONFIG_SENSITIVE})
+
+    state_with_custom_config = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.CUSTOM_CONFIG_OVERLAP_MESSAGE)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_custom_airflow_config(context, state_with_custom_config):
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        local_app_config_parser = configparser.ConfigParser()
+        expected_config_parser = configparser.ConfigParser()
+
+        local_app_config_parser.read_string(relation.local_app_data["config-template"])
+
+        expected_config_parser.read_string(MERGED_CONFIG_TEMPLATE)
+
+        assert dict(local_app_config_parser) == dict(expected_config_parser)
+
+        assert state_out.get_secret(
+            id=relation.local_app_data["secret-sensitive-data"]
+        ).latest_content == {"sensitive-data": json.dumps(SENSITIVE_DATA_WITH_CUSTOM_CONFIGS)}
+
+
 def test_happy_path(context, state, postgres_relation):
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
@@ -196,8 +333,4 @@ def test_happy_path(context, state, postgres_relation):
 
         assert state_out.get_secret(
             id=relation.local_app_data["secret-sensitive-data"]
-        ).latest_content == {
-            "sensitive-data": json.dumps(
-                {"sql_alchemy_connection_string": POSTGRES_SQL_ALCHEMY_STRING}
-            )
-        }
+        ).latest_content == {"sensitive-data": json.dumps(SENSITIVE_DATA)}

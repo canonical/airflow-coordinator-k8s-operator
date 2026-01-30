@@ -772,7 +772,8 @@ class AirflowCoordinatorRequires(ops.Object):
             return False
 
         return all(
-            condition for condition in [
+            condition
+            for condition in [
                 self._ready,
                 self._requirer_handler.provider_content,
                 self._requirer_handler.provider_content.config_template,

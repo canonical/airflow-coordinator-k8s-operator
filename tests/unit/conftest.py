@@ -7,6 +7,7 @@ import unittest.mock
 import ops.testing
 import pytest
 
+import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,52 @@ POSTGRES_SQL_ALCHEMY_STRING = (
     "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
 )
 
+SENSITIVE_DATA = {
+    "sql_alchemy_connection_string": POSTGRES_SQL_ALCHEMY_STRING,
+}
+
+CUSTOM_CONFIG_SENSITIVE = """[section_a]
+key1 = secret1
+key2 = secret2
+
+[section_b]
+key3 = secret3
+"""
+
+CUSTOM_CONFIG_NON_SENSITIVE = """[section_a]
+key4 = non-secret4
+
+[section_b]
+key5 = non-secret5
+"""
+
+CONFIG_TEMPLATED = """[section_a]
+key1 = template1
+key6 = template6
+
+[section_b]
+key7 = template7
+"""
+
+MERGED_CONFIG_TEMPLATE = """[section_a]
+key1 = {{ section_a_key1_secret_value }}
+key2 = {{ section_a_key2_secret_value }}
+key4 = non-secret4
+key6 = template6
+
+[section_b]
+key7 = template7
+key3 = {{ section_b_key3_secret_value }}
+key5 = non-secret5
+"""
+
+SENSITIVE_DATA_WITH_CUSTOM_CONFIGS = {
+    "sql_alchemy_connection_string": POSTGRES_SQL_ALCHEMY_STRING,
+    "section_a_key1_secret_value": "secret1",
+    "section_a_key2_secret_value": "secret2",
+    "section_b_key3_secret_value": "secret3",
+}
+
 
 @pytest.fixture
 def airflow_coordinator_k8s_charm():
@@ -32,7 +79,9 @@ def airflow_coordinator_k8s_charm():
 
 @pytest.fixture(scope="function")
 def context(airflow_coordinator_k8s_charm):
-    return ops.testing.Context(charm_type=airflow_coordinator_k8s_charm)
+    return ops.testing.Context(
+        charm_type=airflow_coordinator_k8s_charm,
+    )
 
 
 def core_component_metadata(
@@ -123,4 +172,26 @@ def state(all_required_relations):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
+    )
+
+
+@pytest.fixture(scope="function")
+def custom_config_secret():
+    return ops.testing.Secret(
+        tracked_content={
+            constants.SENSITIVE_CUSTOM_CONFIG_SECRET_KEY: CUSTOM_CONFIG_SENSITIVE,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def state_with_custom_config(custom_config_secret, all_required_relations):
+    return ops.testing.State(
+        leader=True,
+        config={
+            constants.CUSTOM_CONFIG: CUSTOM_CONFIG_NON_SENSITIVE,
+            constants.SENSITIVE_CUSTOM_CONFIG: custom_config_secret.id,
+        },
+        relations=all_required_relations,
+        secrets=[custom_config_secret],
     )

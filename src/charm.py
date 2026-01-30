@@ -84,23 +84,26 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             ]
         )
 
-    def _perform_checks(self) -> None:
+    def _perform_checks(self) -> None:  # noqa: C901
         """Checks to ensure the charm is able to generate and distribute configs."""
-        if not self.config:
+        if self.config is None:
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_CHARM_SETUP_MESSAGE, ops.WaitingStatus
             )
 
-        if self.config[constants.SENSITIVE_CUSTOM_CONFIG]:
+        if self.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
             try:
-                self.model.get_secret(id=self.config[constants.SENSITIVE_CUSTOM_CONFIG], label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL)
+                self.model.get_secret(
+                    id=self.config[constants.SENSITIVE_CUSTOM_CONFIG],
+                    label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL,
+                )
+            except ops.SecretNotFoundError:  # SecretNotFoundError is a subclass of ModelError
+                raise ExceptionWithStatusError(
+                    constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
+                )
             except ops.ModelError:
                 raise ExceptionWithStatusError(
                     constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
-                )
-            except ops.SecretNotFoundError:
-                raise ExceptionWithStatusError(
-                    constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
                 )
 
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):

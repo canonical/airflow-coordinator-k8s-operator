@@ -3,14 +3,15 @@
 
 """Charm support for the Airflow config generation."""
 
+import collections
+import configparser
+import io
 import logging
+import pathlib
 
 import ops
+
 import constants
-import configparser
-import collections
-import io
-import pathlib
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,25 @@ class AirflowConfigGenerator:
 
         self._custom_config_parser, self._sensitive_custom_config_parser = None, None
 
-        if self._charm.config[constants.CUSTOM_CONFIG]:
+        if self._charm.config.get(constants.CUSTOM_CONFIG):
             self._custom_config_parser = configparser.ConfigParser()
-            self._custom_config_parser.read_string(self.config[constants.CUSTOM_CONFIG], encoding="utf-8")
+            self._custom_config_parser.read_string(self._charm.config[constants.CUSTOM_CONFIG])
 
-        if self._charm.config[constants.SENSITIVE_CUSTOM_CONFIG]:
-            self._sensitive_custom_config_parser = configparser.ConfigParser()
+        if self._charm.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
+            try:
+                custom_config_secret = self._charm.model.get_secret(
+                    id=self._charm.config[constants.SENSITIVE_CUSTOM_CONFIG],
+                    label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL,
+                )
 
-            custom_config_secret = self._charm.model.get_secret(id=self.config[constants.SENSITIVE_CUSTOM_CONFIG], label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL)
-            self._sensitive_custom_config_parser.read_string(custom_config_secret[constants.SENSITIVE_CUSTOM_CONFIG_SECRET_KEY], encoding="utf-8")
+                self._sensitive_custom_config_parser = configparser.ConfigParser()
+                self._sensitive_custom_config_parser.read_string(
+                    custom_config_secret.get_content()[
+                        constants.SENSITIVE_CUSTOM_CONFIG_SECRET_KEY
+                    ],
+                )
+            except (ops.model.SecretNotFoundError, ops.model.ModelError):
+                pass
 
     @property
     def do_custom_configs_overlap(self) -> bool:
@@ -47,7 +58,7 @@ class AirflowConfigGenerator:
         if not self._custom_config_parser or not self._sensitive_custom_config_parser:
             return False
 
-        for section in self._sensitive_custom_config_parser.contents():
+        for section in self._sensitive_custom_config_parser.sections():
             if not self._custom_config_parser.has_section(section):
                 continue
 
@@ -61,19 +72,31 @@ class AirflowConfigGenerator:
 
     @property
     def custom_configs_have_blacklisted_keys(self) -> bool:
-        """Return whether any of the custom configs have blacklisted keys"""
+        """Return whether any of the custom configs have blacklisted keys."""
         if not self._custom_config_parser and not self._sensitive_custom_config_parser:
             return False
 
         has_blacklist = False
 
         for blacklist in BLACKLIST_CUSTOM_CONFIG_KEYS:
-            if self._custom_config_parser and self._custom_config_parser.has_option(blacklist.section, blacklist.option):
-                logger.error(f"Custom config has blacklisted key {blacklist.section}.{blacklist.option}")
+            if self._custom_config_parser and self._custom_config_parser.has_option(
+                blacklist.section, blacklist.option
+            ):
+                logger.error(
+                    f"Custom config has blacklisted key {blacklist.section}.{blacklist.option}"
+                )
                 has_blacklist = True
 
-            if self._sensitive_custom_config_parser and self._sensitive_custom_config_parser.has_option(blacklist.section, blacklist.option):
-                logger.error(f"Sensitive custom config has blacklisted key {blacklist.section}.{blacklist.option}")
+            if (
+                self._sensitive_custom_config_parser
+                and self._sensitive_custom_config_parser.has_option(
+                    blacklist.section, blacklist.option
+                )
+            ):
+                logger.error(
+                    "Sensitive custom config has blacklisted key "
+                    f"{blacklist.section}.{blacklist.option}"
+                )
                 has_blacklist = True
 
         return has_blacklist
@@ -85,20 +108,24 @@ class AirflowConfigGenerator:
         final_config_parser.read(pathlib.Path("src/templates/airflow_config.j2"))
 
         if self._sensitive_custom_config_parser:
-            for section in self._sensitive_custom_config_parser:
+            for section in self._sensitive_custom_config_parser.sections():
                 for option in self._sensitive_custom_config_parser.options(section):
                     if not final_config_parser.has_section(section):
                         final_config_parser.add_section(section)
 
-                    final_config_parser.set(section, option, f"{section}_{option}_secret_value")
+                    final_config_parser.set(
+                        section, option, f"{{{{ {section}_{option}_secret_value }}}}"
+                    )
 
         if self._custom_config_parser:
-            for section in self._custom_config_parser:
+            for section in self._custom_config_parser.sections():
                 for option in self._custom_config_parser.options(section):
                     if not final_config_parser.has_section(section):
                         final_config_parser.add_section(section)
 
-                    final_config_parser.set(section, option, self._custom_config_parser.get(section, option))
+                    final_config_parser.set(
+                        section, option, self._custom_config_parser.get(section, option)
+                    )
 
         string_buffer = io.StringIO()
         final_config_parser.write(string_buffer)
@@ -132,8 +159,10 @@ class AirflowConfigGenerator:
         }
 
         if self._sensitive_custom_config_parser:
-            for section in self._sensitive_custom_config_parser:
+            for section in self._sensitive_custom_config_parser.sections():
                 for option in self._sensitive_custom_config_parser.options(section):
-                    sensitive_data[f"{section}_{option}_secret_value"] = self._sensitive_custom_config_parser.get(section, option)
+                    sensitive_data[f"{section}_{option}_secret_value"] = (
+                        self._sensitive_custom_config_parser.get(section, option)
+                    )
 
         return sensitive_data

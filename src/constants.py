@@ -9,7 +9,9 @@ POSTGRES_RELATION_NAME = "postgres"
 AIRFLOW_DATABASE_NAME = "airflow"
 
 WAITING_FOR_CHARM_SETUP_MESSAGE = "Waiting for charm set up"
-UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE = "Charm is unauthorized to access sensitive custom config secret"
+UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE = (
+    "Charm is unauthorized to access sensitive custom config secret"
+)
 CUSTOM_CONFIG_SECRET_NOT_FOUND = "Sensitive custom config secret not found"
 CUSTOM_CONFIG_OVERLAP_MESSAGE = "Sensitive and non-sensitive custom configs have overlap"
 CUSTOM_CONFIG_HAS_BLACKLIST_KEY = "Sensitive or non-sensitive custom configs have blacklisted keys"
@@ -20,7 +22,7 @@ MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow v
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
 
-SENSITIVE_CUSTOM_CONFIG = "sensitive-airflow-configuration-secret"
+SENSITIVE_CUSTOM_CONFIG = "sensitive_airflow_configuration_secret"
 SENSITIVE_CUSTOM_CONFIG_LABEL = "sensitive_airflow_config"
-SENSITIVE_CUSTOM_CONFIG_SECRET_KEY = "sensitive-custom-airflow-configuration"
-CUSTOM_CONFIG = "custom-airflow-configuration"
+SENSITIVE_CUSTOM_CONFIG_SECRET_KEY = "sensitive_custom_airflow_configuration"
+CUSTOM_CONFIG = "custom_airflow_configuration"
