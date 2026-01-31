@@ -12,6 +12,7 @@ import time
 
 import jubilant
 import yaml
+from conftest import AIRFLOW_COMPONENTS
 
 import constants
 
@@ -26,14 +27,6 @@ WORKLOAD_IMAGE = image_path = CHARMCRAFT_FILE["resources"]["airflow-coordinator-
 ]
 AIRFLOW_VERSION = "3.1.0"
 WORKLOAD_IMAGE_HASH = "somehash"
-AIRFLOW_COMPONENTS = sorted(
-    [
-        "scheduler",
-        "api-server",
-        "triggerer",
-        "dag-processor",
-    ]
-)
 
 
 def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path):
@@ -464,14 +457,9 @@ secret_key2 = super_secret_value2
     config_parser.read_string(next(iter(airflow_configs)))
 
     assert config_parser.get("core", "dags_folder2") == "secret_dags_folder2"
-    assert (
-        config_parser.get("database", "secret_key2") == "super_secret_value2"
-    )
+    assert config_parser.get("database", "secret_key2") == "super_secret_value2"
 
-    assert (
-        "postgresql+psycopg2://"
-        in all_sensitive_data["sql_alchemy_connection_string"]
-    )
+    assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
     assert all_sensitive_data["core_dags_folder2_secret_value"] == "secret_dags_folder2"
     assert all_sensitive_data["database_secret_key2_secret_value"] == "super_secret_value2"
 
@@ -486,7 +474,7 @@ dags_folder3 = secret_dags_folder3
 [database]
 secret_key3 = super_secret_value3
 """,
-        }
+        },
     )
 
     logger.info("Waiting 30s for sensitive custom config change to propagate the cluster")
@@ -533,13 +521,8 @@ secret_key3 = super_secret_value3
     assert not config_parser.get("database", "secret_key2", fallback=None)
 
     assert config_parser.get("core", "dags_folder3") == "secret_dags_folder3"
-    assert (
-        config_parser.get("database", "secret_key3") == "super_secret_value3"
-    )
+    assert config_parser.get("database", "secret_key3") == "super_secret_value3"
 
-    assert (
-        "postgresql+psycopg2://"
-        in all_sensitive_data["sql_alchemy_connection_string"]
-    )
+    assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
     assert all_sensitive_data["core_dags_folder3_secret_value"] == "secret_dags_folder3"
     assert all_sensitive_data["database_secret_key3_secret_value"] == "super_secret_value3"
