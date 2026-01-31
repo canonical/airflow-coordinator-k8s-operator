@@ -429,7 +429,7 @@ secret_key2 = super_secret_value2
 
     juju.wait(jubilant.all_active)
 
-    logger.info("Ensuring cluster in a healty state")
+    logger.info("Ensuring cluster in a healthy state")
 
     airflow_configs, all_sensitive_data = set(), []
 
