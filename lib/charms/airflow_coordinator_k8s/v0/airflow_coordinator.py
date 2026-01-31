@@ -123,8 +123,6 @@ LIBAPI = 0
 # to 0 if you are raising the major API version
 LIBPATCH = 1
 
-# TODO: add your code here! Happy coding!
-
 logger = logging.getLogger(__name__)
 
 

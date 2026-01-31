@@ -34,6 +34,5 @@ MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched work
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
 
 SENSITIVE_CUSTOM_CONFIG = "sensitive_airflow_configuration_secret"
-SENSITIVE_CUSTOM_CONFIG_LABEL = "sensitive_airflow_config"
-SENSITIVE_CUSTOM_CONFIG_SECRET_KEY = "sensitive_custom_airflow_configuration"
+SENSITIVE_CUSTOM_CONFIG_SECRET_KEY = "sensitive-custom-airflow-configuration"
 CUSTOM_CONFIG = "custom_airflow_configuration"

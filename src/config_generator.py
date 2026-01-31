@@ -23,7 +23,6 @@ BLACKLIST_CUSTOM_CONFIG_KEYS = [
 ]
 
 
-# TODO: implement provider validation
 class AirflowConfigGenerator:
     """Encapsulate Airflow config generation logic."""
 
@@ -40,12 +39,11 @@ class AirflowConfigGenerator:
             try:
                 custom_config_secret = self._charm.model.get_secret(
                     id=self._charm.config[constants.SENSITIVE_CUSTOM_CONFIG],
-                    label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL,
                 )
 
                 self._sensitive_custom_config_parser = configparser.ConfigParser()
                 self._sensitive_custom_config_parser.read_string(
-                    custom_config_secret.get_content()[
+                    custom_config_secret.get_content(refresh=True)[
                         constants.SENSITIVE_CUSTOM_CONFIG_SECRET_KEY
                     ],
                 )

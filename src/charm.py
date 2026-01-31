@@ -54,10 +54,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             dependencies_check_callable=self._required_dependencies_exist,
         )
 
-        # TODO: confirm if we can observe custom config secret changed events
         for event in [
             self.on.start,
             self.on.config_changed,
+            self.on.secret_changed,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
@@ -155,13 +155,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             try:
                 self.model.get_secret(
                     id=self.config[constants.SENSITIVE_CUSTOM_CONFIG],
-                    label=constants.SENSITIVE_CUSTOM_CONFIG_LABEL,
                 )
-            except ops.SecretNotFoundError:  # SecretNotFoundError is a subclass of ModelError
+            except ops.SecretNotFoundError as e:  # SecretNotFoundError is a subclass of ModelError
+                logger.error(e)
                 raise ExceptionWithStatusError(
                     constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
                 )
-            except ops.ModelError:
+            except ops.ModelError as e:
+                logger.error(e)
                 raise ExceptionWithStatusError(
                     constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
                 )
