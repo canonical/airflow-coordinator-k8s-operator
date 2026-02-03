@@ -5,6 +5,7 @@
 """The Airflow Coordinator charm application."""
 
 import logging
+import typing
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
@@ -135,6 +136,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         # We need to cast the bool to str, Juju relation data bags can only store strings
         self._peer_relation.data[self.app]["db_migration_ran"] = str(value).lower()
 
+    @property
+    def sensitive_custom_config_secret(self) -> typing.Optional[ops.Secret]:
+        """Returns the sensitive custom secret if its URI is set as a config."""
+        if not self.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
+            return None
+
+        return self.model.get_secret(id=self.config[constants.SENSITIVE_CUSTOM_CONFIG])
+
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
         # TODO: add k8s executor configurator relation here too
@@ -151,21 +160,19 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.WAITING_FOR_CHARM_SETUP_MESSAGE, ops.WaitingStatus
             )
 
-        if self.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
-            try:
-                self.model.get_secret(
-                    id=self.config[constants.SENSITIVE_CUSTOM_CONFIG],
-                )
-            except ops.SecretNotFoundError as e:  # SecretNotFoundError is a subclass of ModelError
-                logger.error(e)
-                raise ExceptionWithStatusError(
-                    constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
-                )
-            except ops.ModelError as e:
-                logger.error(e)
-                raise ExceptionWithStatusError(
-                    constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
-                )
+        try:
+            # Ensure no exceptions raised when accessing the property
+            self.sensitive_custom_config_secret
+        except ops.SecretNotFoundError:  # SecretNotFoundError is a subclass of ModelError
+            logger.exception("Sensitive config secret not found")
+            raise ExceptionWithStatusError(
+                constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
+            )
+        except ops.ModelError:
+            logger.exception("Issue retrieving sensitive config secret")
+            raise ExceptionWithStatusError(
+                constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
+            )
 
         if not self._container.can_connect():
             raise ExceptionWithStatusError(

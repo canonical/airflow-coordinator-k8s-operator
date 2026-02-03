@@ -35,20 +35,16 @@ class AirflowConfigGenerator:
             self._custom_config_parser = configparser.ConfigParser()
             self._custom_config_parser.read_string(self._charm.config[constants.CUSTOM_CONFIG])
 
-        if self._charm.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
-            try:
-                custom_config_secret = self._charm.model.get_secret(
-                    id=self._charm.config[constants.SENSITIVE_CUSTOM_CONFIG],
-                )
-
+        try:
+            if custom_config_secret := self._charm.sensitive_custom_config_secret:
                 self._sensitive_custom_config_parser = configparser.ConfigParser()
                 self._sensitive_custom_config_parser.read_string(
                     custom_config_secret.get_content(refresh=True)[
                         constants.SENSITIVE_CUSTOM_CONFIG_SECRET_KEY
                     ],
                 )
-            except (ops.model.SecretNotFoundError, ops.model.ModelError):
-                pass
+        except (ops.model.SecretNotFoundError, ops.model.ModelError):
+            pass
 
     @property
     def do_custom_configs_overlap(self) -> bool:
@@ -112,7 +108,9 @@ class AirflowConfigGenerator:
                         final_config_parser.add_section(section)
 
                     final_config_parser.set(
-                        section, option, f"{{{{ {section}_{option}_secret_value }}}}"
+                        section,
+                        option,
+                        f'{{{{ custom_config_values["{section}_{option}_secret_value"] }}}}',
                     )
 
         if self._custom_config_parser:
@@ -154,12 +152,13 @@ class AirflowConfigGenerator:
         """All sensitive values that will be included in the Airflow config template."""
         sensitive_data = {
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
+            "custom_config_values": {},
         }
 
         if self._sensitive_custom_config_parser:
             for section in self._sensitive_custom_config_parser.sections():
                 for option in self._sensitive_custom_config_parser.options(section):
-                    sensitive_data[f"{section}_{option}_secret_value"] = (
+                    sensitive_data["custom_config_values"][f"{section}_{option}_secret_value"] = (
                         self._sensitive_custom_config_parser.get(section, option)
                     )
 

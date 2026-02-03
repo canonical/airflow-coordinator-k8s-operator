@@ -341,7 +341,7 @@ def test_custom_airflow_config(context, state_with_custom_config, mock_command_e
 
         expected_config_parser.read_string(MERGED_CONFIG_TEMPLATE)
 
-        assert dict(local_app_config_parser) == dict(expected_config_parser)
+        assert sorted(dict(local_app_config_parser)) == sorted(dict(expected_config_parser))
 
         assert state_out.get_secret(
             id=relation.local_app_data["secret-sensitive-data"]

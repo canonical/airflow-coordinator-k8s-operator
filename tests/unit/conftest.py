@@ -67,9 +67,11 @@ key5 = non-secret5
 
 SENSITIVE_DATA_WITH_CUSTOM_CONFIGS = {
     "sql_alchemy_connection_string": POSTGRES_SQL_ALCHEMY_STRING,
-    "section_a_key1_secret_value": "secret1",
-    "section_a_key2_secret_value": "secret2",
-    "section_b_key3_secret_value": "secret3",
+    "custom_config_values": {
+        "section_a_key1_secret_value": "secret1",
+        "section_a_key2_secret_value": "secret2",
+        "section_b_key3_secret_value": "secret3",
+    },
 }
 
 
