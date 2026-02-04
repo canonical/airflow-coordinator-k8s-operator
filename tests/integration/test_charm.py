@@ -460,8 +460,10 @@ secret_key2 = super_secret_value2
     assert config_parser.get("database", "secret_key2") == "super_secret_value2"
 
     assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
-    assert all_sensitive_data["core_dags_folder2_secret_value"] == "secret_dags_folder2"
-    assert all_sensitive_data["database_secret_key2_secret_value"] == "super_secret_value2"
+    assert sorted(all_sensitive_data["custom_config_values"]) == sorted({
+        "core_dags_folder2_secret_value": "secret_dags_folder2",
+        "database_secret_key2_secret_value": "super_secret_value2",
+    })
 
     logger.info("Updating secret with sensitive custom config")
 
@@ -524,5 +526,7 @@ secret_key3 = super_secret_value3
     assert config_parser.get("database", "secret_key3") == "super_secret_value3"
 
     assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
-    assert all_sensitive_data["core_dags_folder3_secret_value"] == "secret_dags_folder3"
-    assert all_sensitive_data["database_secret_key3_secret_value"] == "super_secret_value3"
+    assert sorted(all_sensitive_data["custom_config_values"]) == sorted({
+        "core_dags_folder3_secret_value": "secret_dags_folder3",
+        "database_secret_key3_secret_value": "super_secret_value3",
+    })

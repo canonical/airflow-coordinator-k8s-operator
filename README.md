@@ -44,5 +44,5 @@ are addressed.
 
 Note: Airflow Coordinator will either update or add key-value pairs specified
 in custom configurations (sensitive or non-sensitive) depending on whether
-the key-value pair exist in the default generated configurtion (with override
+the key-value pair exist in the default generated configuration (with override
 as the merge strategy, giving precedence to custom configuration).
