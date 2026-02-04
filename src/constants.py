@@ -13,7 +13,6 @@ AIRFLOW_DATABASE_NAME = "airflow"
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
 AIRFLOW_CONFIG_PATH = "/airflow.cfg"
 
-WAITING_FOR_CHARM_SETUP_MESSAGE = "Waiting for charm set up"
 UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE = (
     "Charm is unauthorized to access sensitive custom config secret"
 )

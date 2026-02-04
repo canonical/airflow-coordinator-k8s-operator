@@ -155,11 +155,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _perform_checks(self) -> None:  # noqa: C901
         """Checks to ensure the charm is able to generate and distribute configs."""
-        if self.config is None:
-            raise ExceptionWithStatusError(
-                constants.WAITING_FOR_CHARM_SETUP_MESSAGE, ops.WaitingStatus
-            )
-
         try:
             # Ensure no exceptions raised when accessing the property
             self.sensitive_custom_config_secret
