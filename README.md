@@ -11,10 +11,10 @@ mechanism to provide custom configurations relevant to a specific deployment.
 
 There two ways one can input custom Airflow configurations.
 
-For configuration values that are not sensitive (file up to 16MiB), the `custom_airflow_configuration` config option can be used:
+For configuration values that are not sensitive (file up to 16MiB), the `custom-airflow-configuration` config option can be used:
 
 ```
-$ juju config airflow-coordinator-k8s custom_airflow_configuration=@/tmp/custom_config.ini
+$ juju config airflow-coordinator-k8s custom-airflow-configuration=@/tmp/custom_config.ini
 $ cat /tmp/custom_config.ini
 [core]
 dags_folder = /opt/airflow/custom_dags
@@ -27,8 +27,9 @@ For configuration values that are sensitive, we provide a way to specify a
 juju user secret with the config file (up to 1MiB):
 
 ```
-$ juju add-secret custom_config_secret sensitive_airflow_configuration_secret#file=/tmp/sensitive_config.ini
-$ juju config sensitive_airflow_configuration_secret="<URI of custom_config_secret>"
+$ juju add-secret custom-config-secret sensitive-airflow-configuration-secret#file=/tmp/sensitive_config.ini
+$ juju grant-secret custom-config-secret airflow-coordinator-k8s
+$ juju config airflow-coordinator-k8s sensitive-airflow-configuration-secret="<URI of custom-config-secret>"
 $ cat /tmp/sensitivie_config.ini
 [api_auth]
 jwt_secret = some_jwt_secret

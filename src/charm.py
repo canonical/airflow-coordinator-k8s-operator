@@ -215,6 +215,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
+        if not self._config_generator._are_configs_valid:
+            raise ExceptionWithStatusError(
+                constants.INVALID_CUSTOM_CONFIG_MESSAGE, ops.BlockedStatus
+            )
+
         if self._config_generator.do_custom_configs_overlap:
             raise ExceptionWithStatusError(
                 constants.CUSTOM_CONFIG_OVERLAP_MESSAGE, ops.BlockedStatus

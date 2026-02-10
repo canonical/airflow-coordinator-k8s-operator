@@ -15,6 +15,7 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
+import pytest
 from conftest import (
     CONFIG_TEMPLATED,
     CUSTOM_CONFIG_SENSITIVE,
@@ -308,6 +309,53 @@ def test_custom_airflow_config_with_overlap_keys(context, state_with_custom_conf
         state_out = context.run(context.on.config_changed(), state_with_custom_config)
 
     assert state_out.unit_status == ops.BlockedStatus(constants.CUSTOM_CONFIG_OVERLAP_MESSAGE)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+@pytest.mark.parametrize(
+    "ini_file_contents",
+    [
+        "not-valid-ini", # invalid ini
+        """[a]
+a = "a"
+
+[a]
+b = "b"
+""", # duplicate section
+    """[a]
+a = "a"
+a = "b"
+""", # duplicate option
+    ],
+)
+def test_custom_airflow_config_with_invalid_ini_file(
+    context, state_with_custom_config, mock_command_executor, ini_file_contents
+):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.CUSTOM_CONFIG: ini_file_contents})
+
+    state_with_invalid_ini = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_invalid_ini)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.INVALID_CUSTOM_CONFIG_MESSAGE)
 
     for relation in state_out.get_relations("airflow-coordinator"):
         assert relation.local_app_data == {}

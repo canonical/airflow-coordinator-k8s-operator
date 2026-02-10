@@ -47,9 +47,11 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     )
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        )
     )
 
     logger.info("Integrating coordinator <-> postgres")
@@ -57,10 +59,12 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     juju.integrate("airflow-coordinator-k8s", "postgresql-k8s")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+            )
         )
     )
 
@@ -149,10 +153,12 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
         juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+            )
         )
     )
 
@@ -220,10 +226,12 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
         juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(unrelated_components)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(unrelated_components)
+            )
         )
     )
 
@@ -281,9 +289,11 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     juju.remove_relation("airflow-coordinator-k8s", "postgresql-k8s")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        )
     )
 
     for component in AIRFLOW_COMPONENTS:
@@ -460,10 +470,12 @@ secret_key2 = super_secret_value2
     assert config_parser.get("database", "secret_key2") == "super_secret_value2"
 
     assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
-    assert sorted(all_sensitive_data["custom_config_values"]) == sorted({
-        "core_dags_folder2_secret_value": "secret_dags_folder2",
-        "database_secret_key2_secret_value": "super_secret_value2",
-    })
+    assert sorted(all_sensitive_data["custom_config_values"]) == sorted(
+        {
+            "core_dags_folder2_secret_value": "secret_dags_folder2",
+            "database_secret_key2_secret_value": "super_secret_value2",
+        }
+    )
 
     logger.info("Updating secret with sensitive custom config")
 
@@ -526,7 +538,9 @@ secret_key3 = super_secret_value3
     assert config_parser.get("database", "secret_key3") == "super_secret_value3"
 
     assert "postgresql+psycopg2://" in all_sensitive_data["sql_alchemy_connection_string"]
-    assert sorted(all_sensitive_data["custom_config_values"]) == sorted({
-        "core_dags_folder3_secret_value": "secret_dags_folder3",
-        "database_secret_key3_secret_value": "super_secret_value3",
-    })
+    assert sorted(all_sensitive_data["custom_config_values"]) == sorted(
+        {
+            "core_dags_folder3_secret_value": "secret_dags_folder3",
+            "database_secret_key3_secret_value": "super_secret_value3",
+        }
+    )

@@ -29,11 +29,20 @@ class AirflowConfigGenerator:
     def __init__(self, charm: ops.CharmBase):
         self._charm = charm
 
-        self._custom_config_parser, self._sensitive_custom_config_parser = None, None
+        (
+            self._are_configs_valid,
+            self._custom_config_parser,
+            self._sensitive_custom_config_parser,
+        ) = True, None, None
 
         if self._charm.config.get(constants.CUSTOM_CONFIG):
-            self._custom_config_parser = configparser.ConfigParser()
-            self._custom_config_parser.read_string(self._charm.config[constants.CUSTOM_CONFIG])
+            try:
+                self._custom_config_parser = configparser.ConfigParser()
+                self._custom_config_parser.read_string(self._charm.config[constants.CUSTOM_CONFIG])
+            except configparser.Error as e:
+                logger.error(f"Issue parsing non-sensitive custom config: {e}")
+                self._are_configs_valid = False
+                self._custom_config_parser = None
 
         try:
             if custom_config_secret := self._charm.sensitive_custom_config_secret:
@@ -45,6 +54,15 @@ class AirflowConfigGenerator:
                 )
         except (ops.model.SecretNotFoundError, ops.model.ModelError):
             pass
+        except configparser.Error as e:
+            logger.exception(f"Issue parsing sensitive custom config: {e}")
+            self._are_configs_valid = False
+            self._custom_config_parser, self._sensitive_custom_config_parser = None
+
+    @property
+    def are_custom_configs_vaid(self) -> bool:
+        """Return whether any issues with inputted custom configs exist."""
+        return self._are_configs_valid
 
     @property
     def do_custom_configs_overlap(self) -> bool:
