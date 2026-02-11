@@ -39,7 +39,7 @@ secret_key = some_api_server_secret
 ```
 
 Airflow Coordinator performs various validations on provided custom configurations
-(e.g. disallow blacklisted options), and validation failures will result in the
+(e.g. disallow denylisted options), and validation failures will result in the
 most recently supplied custom configurations being inactive until all failures
 are addressed.
 

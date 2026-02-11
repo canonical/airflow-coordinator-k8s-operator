@@ -18,8 +18,8 @@ UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE = (
 )
 CUSTOM_CONFIG_SECRET_NOT_FOUND = "Sensitive custom config secret not found"
 CUSTOM_CONFIG_OVERLAP_MESSAGE = "Sensitive and non-sensitive custom configs have overlap"
-CUSTOM_CONFIG_HAS_BLACKLIST_KEY = (
-    "Sensitive or non-sensitive custom configs have blocked keys, see logs for more details."
+CUSTOM_CONFIG_HAS_DENYLISTED_KEY = (
+    "Sensitive or non-sensitive custom configs have denied keys, see logs for more details."
 )
 INVALID_CUSTOM_CONFIG_MESSAGE = "Provided custom configuration is invalid"
 

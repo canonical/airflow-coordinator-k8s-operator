@@ -225,9 +225,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.CUSTOM_CONFIG_OVERLAP_MESSAGE, ops.BlockedStatus
             )
 
-        if self._config_generator.custom_configs_have_blacklisted_keys:
+        if self._config_generator.custom_configs_have_denylisted_keys:
             raise ExceptionWithStatusError(
-                constants.CUSTOM_CONFIG_HAS_BLACKLIST_KEY, ops.BlockedStatus
+                constants.CUSTOM_CONFIG_HAS_DENYLISTED_KEY, ops.BlockedStatus
             )
 
     def _configure_pebble_layer(self) -> None:

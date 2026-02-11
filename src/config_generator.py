@@ -15,11 +15,11 @@ import constants
 
 logger = logging.getLogger(__name__)
 
-BlacklistConfigKey = collections.namedtuple("BlacklistConfigKey", ["section", "option"])
+DenylistConfigKey = collections.namedtuple("DenylistConfigKey", ["section", "option"])
 
-BLACKLIST_CUSTOM_CONFIG_KEYS = [
-    BlacklistConfigKey(section="core", option="executor"),
-    BlacklistConfigKey(section="database", option="sql_alchemy_conn"),
+DENYLIST_CUSTOM_CONFIG_KEYS = [
+    DenylistConfigKey(section="core", option="executor"),
+    DenylistConfigKey(section="database", option="sql_alchemy_conn"),
 ]
 
 
@@ -83,35 +83,35 @@ class AirflowConfigGenerator:
         return False
 
     @property
-    def custom_configs_have_blacklisted_keys(self) -> bool:
-        """Return whether any of the custom configs have blacklisted keys."""
+    def custom_configs_have_denylisted_keys(self) -> bool:
+        """Return whether any of the custom configs have denylisted keys."""
         if not self._custom_config_parser and not self._sensitive_custom_config_parser:
             return False
 
-        has_blacklist = False
+        has_denylist = False
 
-        for blacklist in BLACKLIST_CUSTOM_CONFIG_KEYS:
+        for denylist in DENYLIST_CUSTOM_CONFIG_KEYS:
             if self._custom_config_parser and self._custom_config_parser.has_option(
-                blacklist.section, blacklist.option
+                denylist.section, denylist.option
             ):
                 logger.error(
-                    f"Custom config has blacklisted key {blacklist.section}.{blacklist.option}"
+                    f"Custom config has denylisted key {denylist.section}.{denylist.option}"
                 )
-                has_blacklist = True
+                has_denylist = True
 
             if (
                 self._sensitive_custom_config_parser
                 and self._sensitive_custom_config_parser.has_option(
-                    blacklist.section, blacklist.option
+                    denylist.section, denylist.option
                 )
             ):
                 logger.error(
-                    "Sensitive custom config has blacklisted key "
-                    f"{blacklist.section}.{blacklist.option}"
+                    "Sensitive custom config has denylisted key "
+                    f"{denylist.section}.{denylist.option}"
                 )
-                has_blacklist = True
+                has_denylist = True
 
-        return has_blacklist
+        return has_denylist
 
     @property
     def config_template(self) -> str:
