@@ -3,16 +3,30 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+import builtins
+import configparser
+import copy
 import dataclasses
 import json
+import logging
+import pathlib
 import unittest.mock
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
+import pytest
+from conftest import (
+    CONFIG_TEMPLATED,
+    CUSTOM_CONFIG_SENSITIVE,
+    MERGED_CONFIG_TEMPLATE,
+    SENSITIVE_DATA_WITH_CUSTOM_CONFIGS,
+)
 
 import command_executor
 import constants
+
+logger = logging.getLogger(__name__)
 
 
 def test_non_leader_unit(context, state, mock_command_executor):
@@ -35,9 +49,7 @@ def test_container_not_ready(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.WaitingStatus(
-        constants.WAITING_FOR_CONTAINER_MESSAGE
-    )
+    assert state_out.unit_status == ops.WaitingStatus(constants.WAITING_FOR_CONTAINER_MESSAGE)
 
 
 def test_missing_postgres_relation(
@@ -213,6 +225,177 @@ def test_invalid_core_charm_workload_image_hash(
         assert relation.local_app_data == {"validation-failures": failures}
 
 
+def test_sensitive_custom_config_secret_not_found(context, state_with_custom_config):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.SENSITIVE_CUSTOM_CONFIG: "secret:oi6jb9z58hre99w63v0g"})
+
+    state_with_custom_config = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.CUSTOM_CONFIG_SECRET_NOT_FOUND)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_sensitive_custom_config_secret_unauthorized(context, state_with_custom_config):
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with (
+        unittest.mock.patch(
+            "builtins.open",
+            side_effect=_mock_open,
+        ),
+        unittest.mock.patch(
+            "ops.model.Model.get_secret", side_effect=ops.model.ModelError("unauthorized")
+        ),
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_custom_airflow_config_with_overlap_keys(context, state_with_custom_config):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.CUSTOM_CONFIG: CUSTOM_CONFIG_SENSITIVE})
+
+    state_with_custom_config = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.CUSTOM_CONFIG_OVERLAP_MESSAGE)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+@pytest.mark.parametrize(
+    "ini_file_contents",
+    [
+        "not-valid-ini", # invalid ini
+        """[a]
+a = "a"
+
+[a]
+b = "b"
+""", # duplicate section
+    """[a]
+a = "a"
+a = "b"
+""", # duplicate option
+    ],
+)
+def test_custom_airflow_config_with_invalid_ini_file(
+    context, state_with_custom_config, mock_command_executor, ini_file_contents
+):
+    config_copy = copy.deepcopy(state_with_custom_config.config)
+    config_copy.update({constants.CUSTOM_CONFIG: ini_file_contents})
+
+    state_with_invalid_ini = dataclasses.replace(state_with_custom_config, config=config_copy)
+
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_invalid_ini)
+
+    assert state_out.unit_status == ops.BlockedStatus(constants.INVALID_CUSTOM_CONFIG_MESSAGE)
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
+def test_custom_airflow_config(context, state_with_custom_config, mock_command_executor):
+    original_open = builtins.open
+
+    def _mock_open(*args, **kwargs):
+        if isinstance(args[0], pathlib.PosixPath) and args[0].resolve().name.endswith(
+            "airflow_config.j2"
+        ):
+            m = unittest.mock.mock_open(read_data=CONFIG_TEMPLATED)
+            return m(*args, **kwargs)
+
+        return original_open(*args, **kwargs)
+
+    with unittest.mock.patch(
+        "builtins.open",
+        side_effect=_mock_open,
+    ):
+        state_out = context.run(context.on.config_changed(), state_with_custom_config)
+
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        local_app_config_parser = configparser.ConfigParser()
+        expected_config_parser = configparser.ConfigParser()
+
+        local_app_config_parser.read_string(relation.local_app_data["config-template"])
+
+        expected_config_parser.read_string(MERGED_CONFIG_TEMPLATE)
+
+        assert sorted(dict(local_app_config_parser)) == sorted(dict(expected_config_parser))
+
+        assert state_out.get_secret(
+            id=relation.local_app_data["secret-sensitive-data"]
+        ).latest_content == {"sensitive-data": json.dumps(SENSITIVE_DATA_WITH_CUSTOM_CONFIGS)}
+
+
 def test_db_migration_does_not_run_on_state_true(
     context,
     all_required_relations,
@@ -225,9 +408,7 @@ def test_db_migration_does_not_run_on_state_true(
     peer_relation_with_state = dataclasses.replace(
         peer_relation, local_app_data={"db_migration_ran": "true"}
     )
-    relations = [
-        r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME
-    ]
+    relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(peer_relation_with_state)
 
     with unittest.mock.patch(
@@ -279,13 +460,9 @@ def test_db_migration_runs_on_state_false(
     mock_run_db_migrate.assert_called_once()
 
 
-def test_db_migration_failure(
-    context, state, mock_command_executor, workload_container
-):
-    mock_command_executor["run_db_migrate"].return_value = (
-        command_executor.CommandExecutionResult(
-            success=False, stdout="", stderr="Migration failed", return_code=1
-        )
+def test_db_migration_failure(context, state, mock_command_executor, workload_container):
+    mock_command_executor["run_db_migrate"].return_value = command_executor.CommandExecutionResult(
+        success=False, stdout="", stderr="Migration failed", return_code=1
     )
 
     with unittest.mock.patch(
@@ -296,9 +473,7 @@ def test_db_migration_failure(
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
 
-    assert state_out.unit_status == ops.BlockedStatus(
-        constants.DB_MIGRATION_FAILED_MESSAGE
-    )
+    assert state_out.unit_status == ops.BlockedStatus(constants.DB_MIGRATION_FAILED_MESSAGE)
 
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):

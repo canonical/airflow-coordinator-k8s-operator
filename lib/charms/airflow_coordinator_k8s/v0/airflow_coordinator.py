@@ -123,8 +123,6 @@ LIBAPI = 0
 # to 0 if you are raising the major API version
 LIBPATCH = 1
 
-# TODO: add your code here! Happy coding!
-
 logger = logging.getLogger(__name__)
 
 
@@ -810,7 +808,8 @@ class AirflowCoordinatorRequires(ops.Object):
             return False
 
         return all(
-            condition for condition in [
+            condition
+            for condition in [
                 self._ready,
                 self._requirer_handler.provider_content,
                 self._requirer_handler.provider_content.config_template,
