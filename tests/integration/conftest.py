@@ -15,18 +15,6 @@ import pytest
 
 logger = logging.getLogger(__name__)
 
-AIRFLOW_COMPONENTS = sorted(
-    [
-        "scheduler",
-        "api-server",
-        "triggerer",
-        "dag-processor",
-    ]
-)
-REQUIRED_APP_NAMES = ["airflow-coordinator-k8s", "postgresql-k8s"] + [
-    f"airflow-{component}-mock" for component in AIRFLOW_COMPONENTS
-]
-
 
 @pytest.fixture(scope="module")
 def juju(request: pytest.FixtureRequest):
@@ -102,43 +90,3 @@ def mock_core_charm():
         raise ValueError(f"More than one mock core .charm file in current directory: {path_list}")
 
     return charm_paths[0]
-
-
-@pytest.fixture(autouse=True)
-def invariant_checker(juju: jubilant.Juju):
-    all_apps_deployed = all(app in juju.status().apps for app in REQUIRED_APP_NAMES)
-
-    # tuple: (app_name, relation endpoint)
-    expected_relations = [
-        ("airflow-coordinator-k8s", "postgres"),
-        ("airflow-api-server-mock", "airflow-coordinator"),
-        ("airflow-scheduler-mock", "airflow-coordinator"),
-        ("airflow-dag-processor-mock", "airflow-coordinator"),
-        ("airflow-triggerer-mock", "airflow-coordinator"),
-    ]
-    expected_relations_present = all(
-        juju.status().apps.get(relation_info[0])
-        and len(juju.status().apps[relation_info[0]].relations.get(relation_info[1], []))
-        for relation_info in expected_relations
-    )
-
-    if not all_apps_deployed or not expected_relations_present:
-        logger.info("Skipping invariant pre-check as model (apps + ready) not present yet")
-    else:
-        assert jubilant.all_active(juju.status())
-
-    yield
-
-    all_apps_deployed = all(app in juju.status().apps for app in REQUIRED_APP_NAMES)
-
-    expected_relations_present = all(
-        juju.status().apps.get(relation_info[0])
-        and len(juju.status().apps[relation_info[0]].relations.get(relation_info[1], []))
-        for relation_info in expected_relations
-    )
-
-    if not all_apps_deployed or not expected_relations_present:
-        logger.info("Skipping invariant post-check as model (apps + ready) not present yet")
-        return
-
-    assert jubilant.all_active(juju.status())

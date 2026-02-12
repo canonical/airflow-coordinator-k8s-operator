@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 class CommandExecutionError(Exception):
     """Exception raised when command execution fails."""
 
-    def __init__(self, message: str, return_code: int | None = None, stderr: str | None = None):
+    def __init__(
+        self, message: str, return_code: int | None = None, stderr: str | None = None
+    ):
         super().__init__(message)
         self.message = message
         self.return_code = return_code
@@ -73,7 +75,9 @@ class CommandExecutor:
                 return_code=0,
             )
         except ops.pebble.ExecError as e:
-            logger.error(f"'airflow db migrate' failed with exit code {e.exit_code}: {e.stderr}")
+            logger.error(
+                f"'airflow db migrate' failed with exit code {e.exit_code}: {e.stderr}"
+            )
             return CommandExecutionResult(
                 success=False,
                 stdout=e.stdout or "",
@@ -82,4 +86,6 @@ class CommandExecutor:
             )
         except Exception as e:
             logger.error(f"Unexpected error executing 'airflow db migrate': {e}")
-            raise CommandExecutionError(f"Failed to execute 'airflow db migrate': {e}") from e
+            raise CommandExecutionError(
+                f"Failed to execute 'airflow db migrate': {e}"
+            ) from e

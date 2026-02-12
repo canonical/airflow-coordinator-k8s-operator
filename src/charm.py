@@ -5,7 +5,6 @@
 """The Airflow Coordinator charm application."""
 
 import logging
-import typing
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
@@ -57,13 +56,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         for event in [
             self.on.start,
-            self.on.config_changed,
-            self.on.secret_changed,
+            self.on.update_status,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
-            self.on.update_status,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -136,14 +133,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         # We need to cast the bool to str, Juju relation data bags can only store strings
         self._peer_relation.data[self.app]["db_migration_ran"] = str(value).lower()
 
-    @property
-    def sensitive_custom_config_secret(self) -> typing.Optional[ops.Secret]:
-        """Returns the sensitive custom secret if its URI is set as a config."""
-        if not self.config.get(constants.SENSITIVE_CUSTOM_CONFIG):
-            return None
-
-        return self.model.get_secret(id=self.config[constants.SENSITIVE_CUSTOM_CONFIG])
-
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
         # TODO: add k8s executor configurator relation here too
@@ -153,22 +142,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             ]
         )
 
-    def _perform_checks(self) -> None:  # noqa: C901
+    def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
-        try:
-            # Ensure no exceptions raised when accessing the property
-            self.sensitive_custom_config_secret
-        except ops.SecretNotFoundError:  # SecretNotFoundError is a subclass of ModelError
-            logger.exception("Sensitive config secret not found")
-            raise ExceptionWithStatusError(
-                constants.CUSTOM_CONFIG_SECRET_NOT_FOUND, ops.BlockedStatus
-            )
-        except ops.ModelError:
-            logger.exception("Issue retrieving sensitive config secret")
-            raise ExceptionWithStatusError(
-                constants.UNAUTHORIZED_ACCESS_TO_SECRET_MESSAGE, ops.BlockedStatus
-            )
-
         if not self._container.can_connect():
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
@@ -213,21 +188,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             raise ExceptionWithStatusError(
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
-            )
-
-        if not self._config_generator._are_configs_valid:
-            raise ExceptionWithStatusError(
-                constants.INVALID_CUSTOM_CONFIG_MESSAGE, ops.BlockedStatus
-            )
-
-        if self._config_generator.do_custom_configs_overlap:
-            raise ExceptionWithStatusError(
-                constants.CUSTOM_CONFIG_OVERLAP_MESSAGE, ops.BlockedStatus
-            )
-
-        if self._config_generator.custom_configs_have_denylisted_keys:
-            raise ExceptionWithStatusError(
-                constants.CUSTOM_CONFIG_HAS_DENYLISTED_KEY, ops.BlockedStatus
             )
 
     def _configure_pebble_layer(self) -> None:
