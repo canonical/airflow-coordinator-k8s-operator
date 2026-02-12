@@ -59,15 +59,3 @@ requires:
 peers:
   coordinator-peers:
     interface: coordinator_peers
-
-config:
-  options:
-    sensitive-airflow-configuration-secret:
-      type: secret
-      description: |
-        URI for secret that contains the user specified Airflow config with sensitive values
-        The URI is the result of adding a secret with the following format
-        juju add-secret airflow-coordinator-k8s custom-config-secret sensitive-airflow-configuration-secret#file=/tmp/sensitive_config.ini
-    custom-airflow-configuration:
-      type: string
-      description: "Custom Airflow config without sensitive values"
