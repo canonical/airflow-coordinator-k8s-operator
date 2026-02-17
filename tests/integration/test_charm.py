@@ -103,10 +103,21 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
 
 def test_relate_and_config_validation(juju: jubilant.Juju):
     """Relate all the components and confirm proper transfer of config and sensitive data."""
+    logger.info(
+        "Integrating coordinator:airflow-api-server <-> mocked api-server:airflow-api-server"
+    )
+
+    juju.integrate(
+        "airflow-coordinator-k8s:airflow-api-server", "airflow-api-server-mock:airflow-api-server"
+    )
+
     logger.info("Integrating coordinator <-> mocked core charms")
 
     for component in AIRFLOW_COMPONENTS:
-        juju.integrate("airflow-coordinator-k8s", f"airflow-{component}-mock")
+        juju.integrate(
+            "airflow-coordinator-k8s:airflow-coordinator",
+            f"airflow-{component}-mock:airflow-coordinator",
+        )
 
     juju.wait(jubilant.all_active)
 
@@ -137,6 +148,10 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     assert len(airflow_configs) == 1
     assert len(all_sensitive_data) == 1
 
+    assert (
+        f"base_url = http://airflow-api-server-mock-endpoints.{juju.model}.svc.cluster.local:8080"
+        in airflow_configs[0]
+    )
     assert (
         "postgresql+psycopg2://"
         in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
