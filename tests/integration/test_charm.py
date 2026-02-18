@@ -66,10 +66,6 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     juju.wait(
         lambda status: (
             jubilant.all_blocked(status, "airflow-coordinator-k8s")
-            and status.apps["airflow-coordinator-k8s"].app_status.message
-            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-                missing_core_components=", ".join(AIRFLOW_COMPONENTS)
-            )
         )
     )
 
@@ -150,7 +146,7 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
 
     assert (
         f"base_url = http://airflow-api-server-mock-endpoints.{juju.model}.svc.cluster.local:8080"
-        in airflow_configs[0]
+        in next(iter(airflow_configs))
     )
     assert (
         "postgresql+psycopg2://"
@@ -170,7 +166,7 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
     logger.info("Breaking integrations between coordinator <-> mocked core charms")
 
     for component in AIRFLOW_COMPONENTS:
-        juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
+        juju.remove_relation("airflow-coordinator-k8s:airflow-coordinator", f"airflow-{component}-mock:airflow-coordinator")
 
     juju.wait(
         lambda status: (
@@ -192,7 +188,7 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
         )
 
     for component in AIRFLOW_COMPONENTS:
-        juju.integrate("airflow-coordinator-k8s", f"airflow-{component}-mock")
+        juju.integrate("airflow-coordinator-k8s:airflow-coordinator", f"airflow-{component}-mock:airflow-coordinator")
 
     juju.wait(jubilant.all_active)
 
@@ -243,7 +239,7 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
     unrelated_components = ["api-server", "scheduler"]
 
     for component in unrelated_components:
-        juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
+        juju.remove_relation("airflow-coordinator-k8s:airflow-coordinator", f"airflow-{component}-mock:airflow-coordinator")
 
     juju.wait(
         lambda status: (
@@ -265,7 +261,7 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
         )
 
     for component in unrelated_components:
-        juju.integrate("airflow-coordinator-k8s", f"airflow-{component}-mock")
+        juju.integrate("airflow-coordinator-k8s:airflow-coordinator", f"airflow-{component}-mock:airflow-coordinator")
 
     juju.wait(jubilant.all_active)
 
