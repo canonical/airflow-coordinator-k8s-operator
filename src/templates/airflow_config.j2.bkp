@@ -1,0 +1,52 @@
+[core]
+# Path to your DAGs
+dags_folder = /opt/airflow/dags
+
+# Executor type
+executor = {{ executor }}
+
+# Load example DAGs
+load_examples = True
+
+# Use FQDN so logs URLs are correct
+hostname_callable = airflow.utils.net.getfqdn
+
+# Optional: control parallelism and max active tasks/runs per DAG
+parallelism = 4
+max_active_tasks_per_dag = 2
+max_active_runs_per_dag = 2
+
+[api]
+port = 8080
+# Base URL for API reachable by scheduler and task subprocesses
+base_url = http://api-server-endpoints.testing.svc.cluster.local:8080
+auth_backend = airflow.api.auth.backend.jwt
+
+[api_auth]
+jwt_secret = my-super-secret-key
+jwt_algorithm = HS256
+# Token expiration in seconds (optional)
+jwt_expires_in = 3600
+
+[logging]
+base_log_folder = /opt/airflow/logs
+remote_logging = False
+logging_server_host = scheduler-endpoints.testing.svc.cluster.local
+logging_server_port = 8793
+
+[scheduler]
+# Scheduler settings to ensure DAGs are picked up continuously
+num_runs = -1
+job_heartbeat_sec = 5
+scheduler_heartbeat_sec = 5
+max_threads = 4
+
+; --- All key-value pairs ans sections below this line are considered sensitive data
+; Make sure they are not added here by mistake and that the keys are not repeated,
+; section on the other hand can be duplicated
+; The values below are only rendered when the render_sensitive_data is True
+
+{% if render_sensitive_data %}
+[database]
+sql_alchemy_conn = {{ sql_alchemy_conn }}
+{% endif %}

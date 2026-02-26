@@ -4,6 +4,7 @@
 
 """The Airflow Coordinator charm application."""
 
+import json
 import logging
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -54,6 +55,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             dependencies_check_callable=self._required_dependencies_exist,
         )
 
+        self._executor_requires = airflow_coordinator.AirflowCoordinatorRequires(
+            self,
+            constants.AIRFLOW_EXECUTOR_CONFIG_RELATION_NAME,
+            callback=self._reconcile,
+        )
+
         for event in [
             self.on.start,
             self.on.update_status,
@@ -61,6 +68,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
+            self.on[constants.AIRFLOW_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -135,12 +143,40 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
-        # TODO: add k8s executor configurator relation here too
         return all(
             [
                 self.model.get_relation(constants.POSTGRES_RELATION_NAME),
             ]
         )
+
+    @property
+    def _executor_config(self) -> dict | None:
+        """Return the parsed executor config dict from the K8s executor relation.
+
+        The K8s executor stores its config as a JSON-serialised dict in the
+        config_template field of the relation.  The value is read directly from
+        the relation databag to avoid the library's automatic JSON-decoding in
+        get_data(), which would convert the JSON string to a dict and cause a
+        Pydantic validation error when building the provider model.
+        """
+        relation = self.model.get_relation(constants.AIRFLOW_EXECUTOR_CONFIG_RELATION_NAME)
+        if not relation:
+            return None
+        raw = relation.data[relation.app].get("config-template")
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @property
+    def _executor_pod_spec(self) -> str | None:
+        """Return the rendered pod spec template from the K8s executor relation."""
+        relation = self.model.get_relation(constants.AIRFLOW_EXECUTOR_CONFIG_RELATION_NAME)
+        if not relation:
+            return None
+        return relation.data[relation.app].get("kubernetes-executor-pod-spec") or None
 
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
@@ -202,13 +238,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         )
         self._container.replan()
 
+    @property
+    def _executor_class(self) -> str:
+        """Return the Airflow executor class name based on active integrations."""
+        return "KubernetesExecutor" if self._executor_config else "LocalExecutor"
+
     def _write_airflow_config(self) -> None:
         """Write the Airflow configuration file to the container."""
         airflow_coordinator.write_airflow_config(
             self._container,
             constants.AIRFLOW_CONFIG_PATH,
             self._config_generator.config_template,
-            self._config_generator.sensitive_config_values,
+            {
+                **self._config_generator.sensitive_config_values,
+                "executor": self._executor_class,
+                "render_sensitive_data": True,
+            },
         )
 
     def _run_db_migrate(self) -> None:
@@ -237,8 +282,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 self._db_migration_ran = True
 
             self._config_provider.set_airflow_config(
-                self._config_generator.config_template,
-                sensitive_data=self._config_generator.sensitive_config_values,
+                self._config_generator.config_template_with_extra_config(
+                    **(self._executor_config or {})
+                ),
+                k8s_executor_pod_spec_template=self._executor_pod_spec,
+                sensitive_data={
+                    **self._config_generator.sensitive_config_values,
+                    "executor": self._executor_class,
+                    "render_sensitive_data": True,
+                },
             )
         except ExceptionWithStatusError as e:
             logger.error(e)

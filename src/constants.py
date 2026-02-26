@@ -4,6 +4,7 @@
 """Constants to be used in the Airflow Coordiantor charm."""
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
+AIRFLOW_EXECUTOR_CONFIG_RELATION_NAME = "airflow-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
 

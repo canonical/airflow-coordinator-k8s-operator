@@ -43,9 +43,27 @@ class AirflowConfigGenerator:
 
         return f"postgresql+psycopg2://{username}:{password}@{endpoints[0]}/{database}"
 
+    def config_template_with_extra_config(self, **extra_config) -> str:
+        """Return the Airflow config template merged with extra config from different integrators.
+
+        Returns:
+            Combined Jinja2 template string ready to share with core charms.
+        """
+        base = self.config_template
+        if not extra_config:
+            return base
+
+        extra_lines = []
+        for section, keys in extra_config.items():
+            extra_lines.append(f"\n[{section}]")
+            for key, value in keys.items():
+                extra_lines.append(f"{key} = {value}")
+
+        return base + "\n".join(extra_lines) + "\n"
+
     @property
     def sensitive_config_values(self) -> dict[str, str]:
         """All sensitive values that will be included in the Airflow config template."""
         return {
-            "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
+            "sql_alchemy_conn": self._sql_alchemy_connection_string,
         }

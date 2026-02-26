@@ -1,13 +1,26 @@
 [core]
-dags_folder = dags
-executor = LocalExecutor
-load_examples = False
-
-[database]
-sql_alchemy_conn = {{ sql_alchemy_connection_string }}
+dags_folder = /opt/airflow/dags
+executor = {{ executor }}
+hostname_callable = airflow.utils.net.getfqdn
+load_examples = True
 
 [api]
 port = 8080
+base_url = http://api-server-endpoints.testing.svc.cluster.local:8080
+
+[api_auth]
+jwt_secret = my-super-secret-key
+jwt_algorithm = HS256
 
 [logging]
-base_log_folder = logs
+base_log_folder = /opt/airflow/logs
+
+; --- All key-value pairs and sections below this line are considered sensitive data
+; Make sure they are not added here by mistake and that the keys are not repeated,
+; section on the other hand can be duplicated
+; The values below are only rendered when the render_sensitive_data is True
+
+{% if render_sensitive_data %}
+[database]
+sql_alchemy_conn = {{ sql_alchemy_conn }}
+{% endif %}

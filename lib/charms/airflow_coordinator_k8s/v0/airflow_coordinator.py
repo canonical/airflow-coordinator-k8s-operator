@@ -152,7 +152,7 @@ def write_airflow_config(
         raise RuntimeError("Cannot connect to workload container")
 
     try:
-        config = jinja2.Environment().from_string(config_template).render(**sensitive_data)
+        config = jinja2.Template(config_template).render(**sensitive_data)
 
         container.push(
             config_path,
@@ -610,7 +610,7 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.interface.relations:
             return
 
-        if not all([config_template, sensitive_data]):
+        if not config_template:
             return
 
         if not self.charm.unit.is_leader():
@@ -708,6 +708,77 @@ class AirflowCoordinatorProviderEventHandler(
 
 
 class AirflowCoordinatorRequires(ops.Object):
+    """A requirer handler encapsulating the airflow coordinator relation."""
+
+    def __init__(
+        self,
+        charm: ops.CharmBase,
+        relation_name: str,
+        callback: typing.Callable,
+    ):
+        self._charm = charm
+        self._relation_name = relation_name
+
+        if not charm.model.get_relation(relation_name):
+            for event in [
+                charm.on[relation_name].relation_joined,
+                charm.on[relation_name].relation_broken,
+            ]:
+                self._charm.framework.observe(event, callback)
+
+            return
+
+        super().__init__(charm, relation_name)
+
+        self._requirer_handler = AirflowCoordinatorRequirerEventHandler(
+            charm, relation_name, AirflowCoordinatorProviderModel
+        )
+
+        for event in [
+            self._requirer_handler.on.airflow_config_available,
+            self._requirer_handler.on.airflow_config_updated,
+            charm.on[relation_name].relation_joined,
+            charm.on[relation_name].relation_broken,
+        ]:
+            self.framework.observe(event, callback)
+
+    @property
+    def provider_content(self) -> typing.Optional[AirflowCoordinatorProviderModel]:
+        """Data from the related Airflow Coordinator charm."""
+        return self._requirer_handler.provider_content
+
+    @property
+    def can_write_airflow_config(self) -> bool:
+        """Return True if it is safe to write the Airflow config to the container.
+
+        This check ensures the coordinator has shared relevant config data
+        in the relation and that the relation exists.
+        """
+        content = self._requirer_handler.provider_content
+        return bool(content and content.config_template and content.sensitive_data)
+
+    def write_airflow_config(self, config_path: str) -> None:
+        """Render the Airflow config and write it to a local filesystem path.
+
+        Unlike AirflowCoordinatorCoreRequires, this method writes to a plain
+        filesystem path rather than a pebble workload container, making it
+        suitable for charms without a sidecar container.
+
+        Args:
+            config_path: the path where the configuration file will be saved.
+        """
+        import pathlib
+
+        provider_content = self._requirer_handler.provider_content
+        config = jinja2.Template(provider_content.config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
+        path = pathlib.Path(config_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(config)
+
+
+class AirflowCoordinatorCoreRequires(ops.Object):
     """A requirer handler encapsulating the airflow coordinator relation."""
 
     def __init__(
@@ -847,11 +918,9 @@ class AirflowCoordinatorRequires(ops.Object):
         """Render the K8s executor pod spec in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
 
-        k8s_executor_pod_spec = (
-            jinja2.Environment()
-            .from_string(provider_content.kubernetes_executor_pod_spec)
-            .render(**json.loads(provider_content.sensitive_data))
-        )
+        k8s_executor_pod_spec = jinja2.Template(
+            provider_content.kubernetes_executor_pod_spec
+        ).render(**json.loads(provider_content.sensitive_data))
 
         self._workload_container.push(
             filepath,
@@ -1000,20 +1069,27 @@ class AirflowCoordinatorProvides(ops.Object):
 
     def set_airflow_config(
         self,
-        config_template: str,
+        config_template: typing.Optional[str] = None,
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
+        executor_config: typing.Optional[dict] = None,
     ) -> None:
         """Update config with related core charms.
 
         Args:
-            config_template: Airflow config (jinja template string)
-            k8s_executor_pod_spec_template: (optional) K8s executor pod spec template
+            config_template: Airflow config as a Jinja2 template string.
+            k8s_executor_pod_spec_template: (optional) K8s executor pod spec template.
             sensitive_data: sensitive data to render config of k8s executor pod
-                spec jinja templates with
+                spec jinja templates with.
+            executor_config: Airflow config as a dict of section -> key/value pairs
+                (e.g. {"executor": {"default_queue": "kubernetes"}}). Serialised to
+                JSON and stored in the relation databag. Takes precedence over
+                config_template when both are provided.
         """
+        template = json.dumps(executor_config) if executor_config is not None else config_template
+
         self._provider_handler.update_content(
-            config_template=config_template,
+            config_template=template,
             kubernetes_executor_pod_spec=k8s_executor_pod_spec_template,
             sensitive_data=sensitive_data,
         )

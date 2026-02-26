@@ -55,6 +55,9 @@ resources:
 requires:
   postgres:
     interface: postgresql_client
+  airflow-executor-config:
+    interface: airflow_coordinator
+    limit: 1
 
 peers:
   coordinator-peers:
