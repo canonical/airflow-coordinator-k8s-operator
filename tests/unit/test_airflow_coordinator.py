@@ -627,7 +627,7 @@ class TestAirflowCoordinatorCoreRequires:
 
             assert manager.charm.requirer.can_write_airflow_config
 
-            manager.charm.requirer.write_airflow_config("/config/path")
+            config_changed = manager.charm.requirer.write_airflow_config("/config/path")
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context
@@ -639,6 +639,90 @@ class TestAirflowCoordinatorCoreRequires:
             assert config_file_path.is_file()
             assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
+            assert config_changed
+
+    def test_write_airflow_config_returns_false_when_unchanged(self):
+        """Skip write and return False when rendered config is unchanged."""
+
+        class _PulledFile:
+            def __init__(self, content: str):
+                self._content = content
+
+            def read(self):
+                return self._content
+
+        class _FakeContainer:
+            def __init__(self, existing_content: str):
+                self._existing_content = existing_content
+                self.push_calls = 0
+
+            def can_connect(self):
+                return True
+
+            def exists(self, path: str):
+                return path == "/config/path"
+
+            def pull(self, path: str):
+                assert path == "/config/path"
+                return _PulledFile(self._existing_content)
+
+            def push(self, *_args, **_kwargs):
+                self.push_calls += 1
+
+        container = _FakeContainer(existing_content="test-config: s3cret")
+
+        changed = airflow_coordinator.write_airflow_config(
+            container=container,
+            config_path="/config/path",
+            config_template="test-config: {{ secret }}",
+            sensitive_data={"secret": "s3cret"},
+        )
+
+        assert not changed
+        assert container.push_calls == 0
+
+    def test_write_airflow_config_returns_true_when_content_changes(self):
+        """Write and return True when rendered config content changes."""
+
+        class _PulledFile:
+            def __init__(self, content: str):
+                self._content = content
+
+            def read(self):
+                return self._content
+
+        class _FakeContainer:
+            def __init__(self, existing_content: str):
+                self._existing_content = existing_content
+                self.push_calls = 0
+                self.last_pushed_content = None
+
+            def can_connect(self):
+                return True
+
+            def exists(self, path: str):
+                return path == "/config/path"
+
+            def pull(self, path: str):
+                assert path == "/config/path"
+                return _PulledFile(self._existing_content)
+
+            def push(self, _path: str, content: str, **_kwargs):
+                self.push_calls += 1
+                self.last_pushed_content = content
+
+        container = _FakeContainer(existing_content="test-config: old")
+
+        changed = airflow_coordinator.write_airflow_config(
+            container=container,
+            config_path="/config/path",
+            config_template="test-config: {{ secret }}",
+            sensitive_data={"secret": "s3cret"},
+        )
+
+        assert changed
+        assert container.push_calls == 1
+        assert container.last_pushed_content == "test-config: s3cret"
 
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,
