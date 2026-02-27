@@ -50,6 +50,11 @@ class AirflowConfigGenerator:
             Combined Jinja2 template string ready to share with core charms.
         """
         base = self.config_template
+        dag_bundle_config_list = self._charm.config.get("dag_bundle_config_list", "").strip()
+        if dag_bundle_config_list:
+            extra_config.setdefault("dag_processor", {})
+            extra_config["dag_processor"]["dag_bundle_config_list"] = dag_bundle_config_list
+
         if not extra_config:
             return base
 

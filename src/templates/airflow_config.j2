@@ -2,11 +2,11 @@
 dags_folder = /opt/airflow/dags
 executor = {{ executor }}
 hostname_callable = airflow.utils.net.getfqdn
-load_examples = True
+load_examples = False
 
 [api]
 port = 8080
-base_url = http://api-server-endpoints.testing.svc.cluster.local:8080
+base_url = http://api-server-endpoints.airflow.svc.cluster.local:8080
 
 [api_auth]
 jwt_secret = my-super-secret-key

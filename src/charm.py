@@ -63,6 +63,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         for event in [
             self.on.start,
+            self.on.config_changed,
             self.on.update_status,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
@@ -277,9 +278,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # Use peer relation data to track if db migration has run
             # TODO: once we have upgrade logic, we'll need to change the
             # conditions under which this state will be True/False.
-            if not self._db_migration_ran:
-                self._run_db_migrate()
-                self._db_migration_ran = True
+            # if not self._db_migration_ran:
+            self._run_db_migrate()
+            # self._db_migration_ran = True
 
             self._config_provider.set_airflow_config(
                 self._config_generator.config_template_with_extra_config(

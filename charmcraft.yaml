@@ -62,3 +62,15 @@ requires:
 peers:
   coordinator-peers:
     interface: coordinator_peers
+
+config:
+  options:
+    dag_bundle_config_list:
+      type: string
+      default: '[{"name": "apache-airflow-examples", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"repo_url": "https://github.com/apache/airflow.git", "subdir": "airflow-core/src/airflow/example_dags", "tracking_ref": "main"}}]'
+      description: >
+        JSON list of DAG bundle configurations to distribute to all Airflow core
+        components (scheduler, dag-processor, triggerer, api-server). Each entry
+        must have "name", "classpath", and optionally "kwargs". Example:
+          [{"name": "my-dags", "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
+            "kwargs": {"repo_url": "https://github.com/org/repo.git", "tracking_ref": "main"}}]
