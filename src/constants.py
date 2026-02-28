@@ -5,6 +5,7 @@
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
+AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -28,3 +29,6 @@ WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE = "Waiting for host+port information fr
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
+WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
+    "Waiting for configuration from the kubernetes executor charm"
+)
