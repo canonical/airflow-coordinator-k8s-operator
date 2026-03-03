@@ -22,7 +22,9 @@ POSTGRES_DATA = {
 }
 
 
-POSTGRES_SQL_ALCHEMY_STRING = "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+POSTGRES_SQL_ALCHEMY_STRING = (
+    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+)
 
 
 @pytest.fixture
@@ -92,9 +94,7 @@ def triggerer_relation(triggerer_data):
 
 @pytest.fixture(scope="function")
 def dag_processor_relation(dag_processor_data):
-    return ops.testing.Relation(
-        "airflow-coordinator", remote_app_data=dag_processor_data
-    )
+    return ops.testing.Relation("airflow-coordinator", remote_app_data=dag_processor_data)
 
 
 @pytest.fixture(scope="function")

@@ -34,9 +34,7 @@ AIRFLOW_COMPONENTS = sorted(
 )
 
 
-def test_deploy(
-    juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path
-):
+def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path):
     """Deploy the charm under test."""
     logger.info("Deploying coordinator + postgresql")
 
@@ -54,9 +52,11 @@ def test_deploy(
     )
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        )
     )
 
     logger.info("Integrating coordinator <-> postgres")
@@ -64,10 +64,12 @@ def test_deploy(
     juju.integrate("airflow-coordinator-k8s", "postgresql-k8s")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+            )
         )
     )
 
@@ -83,9 +85,9 @@ def test_deploy(
                 "workload_image_hash": WORKLOAD_IMAGE_HASH,
             },
             resources={
-                "workload-container": CORE_CHARM_METADATA["resources"][
-                    "workload-container"
-                ]["upstream-source"],
+                "workload-container": CORE_CHARM_METADATA["resources"]["workload-container"][
+                    "upstream-source"
+                ],
             },
         )
 
@@ -156,10 +158,12 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
         juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(AIRFLOW_COMPONENTS)
+            )
         )
     )
 
@@ -227,10 +231,12 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
         juju.remove_relation("airflow-coordinator-k8s", f"airflow-{component}-mock")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
-            missing_core_components=", ".join(unrelated_components)
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_INTEGRATIONS_MESSAGE_TEMPLATE.format(
+                missing_core_components=", ".join(unrelated_components)
+            )
         )
     )
 
@@ -288,16 +294,15 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     juju.remove_relation("airflow-coordinator-k8s", "postgresql-k8s")
 
     juju.wait(
-        lambda status: jubilant.all_blocked(status, "airflow-coordinator-k8s")
-        and status.apps["airflow-coordinator-k8s"].app_status.message
-        == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        lambda status: (
+            jubilant.all_blocked(status, "airflow-coordinator-k8s")
+            and status.apps["airflow-coordinator-k8s"].app_status.message
+            == constants.MISSING_POSTGRES_INTEGRATION_MESSAGE
+        )
     )
 
     for component in AIRFLOW_COMPONENTS:
-        assert (
-            juju.run(f"airflow-{component}-mock/0", "check-ready").results["ready"]
-            == "False"
-        )
+        assert juju.run(f"airflow-{component}-mock/0", "check-ready").results["ready"] == "False"
 
     logger.info("Recreate integration between coordinator <-> postgres")
 

@@ -35,9 +35,7 @@ def test_container_not_ready(
 
     state_out = context.run(context.on.start(), state)
 
-    assert state_out.unit_status == ops.WaitingStatus(
-        constants.WAITING_FOR_CONTAINER_MESSAGE
-    )
+    assert state_out.unit_status == ops.WaitingStatus(constants.WAITING_FOR_CONTAINER_MESSAGE)
 
 
 def test_missing_postgres_relation(
@@ -225,9 +223,7 @@ def test_db_migration_does_not_run_on_state_true(
     peer_relation_with_state = dataclasses.replace(
         peer_relation, local_app_data={"db_migration_ran": "true"}
     )
-    relations = [
-        r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME
-    ]
+    relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(peer_relation_with_state)
 
     with unittest.mock.patch(
@@ -279,13 +275,9 @@ def test_db_migration_runs_on_state_false(
     mock_run_db_migrate.assert_called_once()
 
 
-def test_db_migration_failure(
-    context, state, mock_command_executor, workload_container
-):
-    mock_command_executor["run_db_migrate"].return_value = (
-        command_executor.CommandExecutionResult(
-            success=False, stdout="", stderr="Migration failed", return_code=1
-        )
+def test_db_migration_failure(context, state, mock_command_executor, workload_container):
+    mock_command_executor["run_db_migrate"].return_value = command_executor.CommandExecutionResult(
+        success=False, stdout="", stderr="Migration failed", return_code=1
     )
 
     with unittest.mock.patch(
@@ -296,9 +288,7 @@ def test_db_migration_failure(
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
 
-    assert state_out.unit_status == ops.BlockedStatus(
-        constants.DB_MIGRATION_FAILED_MESSAGE
-    )
+    assert state_out.unit_status == ops.BlockedStatus(constants.DB_MIGRATION_FAILED_MESSAGE)
 
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):
