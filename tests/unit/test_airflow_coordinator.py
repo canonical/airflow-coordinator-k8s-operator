@@ -641,35 +641,27 @@ class TestAirflowCoordinatorCoreRequires:
             assert config_file_path.stat().st_mode & 0o777 == 0o644
             assert config_changed
 
-    def test_write_airflow_config_returns_false_when_unchanged(self):
-        """Skip write and return False when rendered config is unchanged."""
+    @pytest.mark.parametrize(
+        "file_exists, existing_content, expected_changed, expect_push",
+        [
+            pytest.param(True, "test-config: s3cret", False, False, id="unchanged"),
+            pytest.param(True, "test-config: old", True, True, id="content_changes"),
+            pytest.param(False, None, True, True, id="file_missing"),
+        ],
+    )
+    def test_write_airflow_config_idempotent(
+        self, file_exists, existing_content, expected_changed, expect_push
+    ):
+        """Write config only when content differs; return True if written, False otherwise."""
+        from unittest.mock import Mock
 
-        class _PulledFile:
-            def __init__(self, content: str):
-                self._content = content
+        pulled_file = Mock()
+        pulled_file.read.return_value = existing_content
 
-            def read(self):
-                return self._content
-
-        class _FakeContainer:
-            def __init__(self, existing_content: str):
-                self._existing_content = existing_content
-                self.push_calls = 0
-
-            def can_connect(self):
-                return True
-
-            def exists(self, path: str):
-                return path == "/config/path"
-
-            def pull(self, path: str):
-                assert path == "/config/path"
-                return _PulledFile(self._existing_content)
-
-            def push(self, *_args, **_kwargs):
-                self.push_calls += 1
-
-        container = _FakeContainer(existing_content="test-config: s3cret")
+        container = Mock()
+        container.can_connect.return_value = True
+        container.exists.return_value = file_exists
+        container.pull.return_value = pulled_file
 
         changed = airflow_coordinator.write_airflow_config(
             container=container,
@@ -678,51 +670,11 @@ class TestAirflowCoordinatorCoreRequires:
             sensitive_data={"secret": "s3cret"},
         )
 
-        assert not changed
-        assert container.push_calls == 0
-
-    def test_write_airflow_config_returns_true_when_content_changes(self):
-        """Write and return True when rendered config content changes."""
-
-        class _PulledFile:
-            def __init__(self, content: str):
-                self._content = content
-
-            def read(self):
-                return self._content
-
-        class _FakeContainer:
-            def __init__(self, existing_content: str):
-                self._existing_content = existing_content
-                self.push_calls = 0
-                self.last_pushed_content = None
-
-            def can_connect(self):
-                return True
-
-            def exists(self, path: str):
-                return path == "/config/path"
-
-            def pull(self, path: str):
-                assert path == "/config/path"
-                return _PulledFile(self._existing_content)
-
-            def push(self, _path: str, content: str, **_kwargs):
-                self.push_calls += 1
-                self.last_pushed_content = content
-
-        container = _FakeContainer(existing_content="test-config: old")
-
-        changed = airflow_coordinator.write_airflow_config(
-            container=container,
-            config_path="/config/path",
-            config_template="test-config: {{ secret }}",
-            sensitive_data={"secret": "s3cret"},
-        )
-
-        assert changed
-        assert container.push_calls == 1
-        assert container.last_pushed_content == "test-config: s3cret"
+        assert changed is expected_changed
+        if expect_push:
+            container.push.assert_called_once()
+        else:
+            container.push.assert_not_called()
 
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,

@@ -201,11 +201,9 @@ def write_airflow_config(
     try:
         config = jinja2.Template(config_template).render(**sensitive_data)
 
-        if container.exists(config_path):
-            current_config = container.pull(config_path).read()
-            if current_config == config:
-                logger.info(f"Airflow config at {config_path} is unchanged; skipping write")
-                return False
+        if container.exists(config_path) and container.pull(config_path).read() == config:
+            logger.info("Airflow config at %s is unchanged; skipping write", config_path)
+            return False
 
         container.push(
             config_path,
@@ -214,7 +212,7 @@ def write_airflow_config(
             group="root",
             make_dirs=True,
         )
-        logger.info(f"Successfully wrote Airflow config to {config_path}")
+        logger.info("Successfully wrote Airflow config to %s", config_path)
         return True
     except Exception as e:
         raise RuntimeError(f"Failed to write Airflow config: {e}") from e
