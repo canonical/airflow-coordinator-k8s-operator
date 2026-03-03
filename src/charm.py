@@ -6,6 +6,7 @@
 
 import logging
 
+import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import ops
@@ -52,6 +53,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_COORDINATOR_RELATION_NAME,
             callback=self._reconcile,
             dependencies_check_callable=self._required_dependencies_exist,
+        )
+        self._api_server_requires = airflow_api_server.AirflowAPIServerRequires(
+            self,
+            constants.AIRFLOW_API_SERVER_ENDPOINT_NAME,
+            callback=self._reconcile,
         )
 
         for event in [
@@ -139,6 +145,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return all(
             [
                 self.model.get_relation(constants.POSTGRES_RELATION_NAME),
+                self.model.get_relation(constants.AIRFLOW_API_SERVER_ENDPOINT_NAME),
             ]
         )
 
@@ -163,6 +170,20 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self._all_database_connection_details_present:
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_DATABASE_CONNECTION_MESSAGE, ops.WaitingStatus
+            )
+
+        if not self.model.get_relation(constants.AIRFLOW_API_SERVER_ENDPOINT_NAME):
+            self._config_provider.set_validation_errors()
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_API_SERVER_RELATION_MESSAGE, ops.BlockedStatus
+            )
+
+        if (
+            not self._api_server_requires.api_server_host
+            or not self._api_server_requires.api_server_port
+        ):
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE, ops.WaitingStatus
             )
 
         missing_core_components = self._config_provider.missing_core_components

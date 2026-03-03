@@ -5,6 +5,7 @@
 
 import logging
 
+import jinja2
 import ops
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,16 @@ class AirflowConfigGenerator:
         with open("src/templates/airflow_config.j2") as config_template_file:
             config_template = config_template_file.read()
 
-        return config_template
+        return (
+            jinja2.Environment(loader=jinja2.BaseLoader(), undefined=jinja2.DebugUndefined)
+            .from_string(config_template)
+            .render(
+                {
+                    "api_server_base_url": f"http://{self._charm._api_server_requires.api_server_host}:{self._charm._api_server_requires.api_server_port}",
+                    "api_server_port": self._charm._api_server_requires.api_server_port,
+                }
+            )
+        )
 
     @property
     def _sql_alchemy_connection_string(self) -> str:

@@ -22,7 +22,9 @@ POSTGRES_DATA = {
 }
 
 
-POSTGRES_SQL_ALCHEMY_STRING = "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+POSTGRES_SQL_ALCHEMY_STRING = (
+    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+)
 
 
 @pytest.fixture
@@ -92,9 +94,7 @@ def triggerer_relation(triggerer_data):
 
 @pytest.fixture(scope="function")
 def dag_processor_relation(dag_processor_data):
-    return ops.testing.Relation(
-        "airflow-coordinator", remote_app_data=dag_processor_data
-    )
+    return ops.testing.Relation("airflow-coordinator", remote_app_data=dag_processor_data)
 
 
 @pytest.fixture(scope="function")
@@ -119,6 +119,17 @@ def postgres_relation():
 
 
 @pytest.fixture(scope="function")
+def airflow_api_server_requires_relation():
+    return ops.testing.Relation(
+        "airflow-api-server",
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,
     api_server_relation,
@@ -126,6 +137,7 @@ def all_required_relations(
     triggerer_relation,
     dag_processor_relation,
     peer_relation,
+    airflow_api_server_requires_relation,
 ):
     return [
         postgres_relation,
@@ -134,6 +146,7 @@ def all_required_relations(
         triggerer_relation,
         dag_processor_relation,
         peer_relation,
+        airflow_api_server_requires_relation,
     ]
 
 
