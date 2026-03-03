@@ -43,6 +43,11 @@ requires:
     interface: airflow_coordinator
     limit: 1
 
+provides:
+  airflow-api-server:
+    interface: airflow_api_server
+    limit: 1
+
 config:
   options:
     component:

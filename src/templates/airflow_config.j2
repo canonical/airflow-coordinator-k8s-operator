@@ -7,7 +7,8 @@ load_examples = False
 sql_alchemy_conn = {{ sql_alchemy_connection_string }}
 
 [api]
-port = 8080
+base_url = {{ api_server_base_url }}
+port = {{ api_server_port }}
 
 [logging]
 base_log_folder = logs

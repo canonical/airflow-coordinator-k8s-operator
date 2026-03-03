@@ -38,10 +38,6 @@ parts:
     stage:
       - LICENSE
 
-provides:
-  airflow-coordinator:
-    interface: airflow_coordinator
-
 containers:
   airflow-coordinator:
     resource: airflow-coordinator-image
@@ -52,9 +48,17 @@ resources:
     description: Airflow workload container for running commands
     upstream-source: ubuntu/airflow:3.1-24.04_edge
 
+provides:
+  airflow-coordinator:
+    interface: airflow_coordinator
+
 requires:
   postgres:
     interface: postgresql_client
+    limit: 1
+  airflow-api-server:
+    interface: airflow_api_server
+    limit: 1
 
 peers:
   coordinator-peers:

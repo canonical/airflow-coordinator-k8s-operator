@@ -12,6 +12,7 @@ from charms.airflow_coordinator_k8s.v0 import airflow_coordinator
 logger = logging.getLogger(__name__)
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
+AIRFLOW_API_SERVER_RELATION_NAME = "airflow-api-server"
 CONTAINER_NAME = "workload"
 AIRFLOW_CONFIG_PATH = "/airflow.cfg"
 K8S_EXECUTOR_POD_SPEC_PATH = "/k8s_executor_pod_spec"
@@ -44,8 +45,16 @@ class MockCoreCharmCharm(ops.CharmBase):
             self.on[AIRFLOW_COORDINATOR_RELATION_NAME].relation_joined,
             self.on[AIRFLOW_COORDINATOR_RELATION_NAME].relation_changed,
             self.on[AIRFLOW_COORDINATOR_RELATION_NAME].relation_broken,
+            self.on[AIRFLOW_API_SERVER_RELATION_NAME].relation_joined,
+            self.on[AIRFLOW_API_SERVER_RELATION_NAME].relation_changed,
+            self.on[AIRFLOW_API_SERVER_RELATION_NAME].relation_broken,
         ]:
             self.framework.observe(event, self.log_event_and_set_status)
+
+        self.framework.observe(
+            self.on[AIRFLOW_API_SERVER_RELATION_NAME].relation_joined,
+            self._populate_api_server_relation,
+        )
 
         self.framework.observe(self.on.check_ready_action, self._check_ready)
         self.framework.observe(self.on.get_airflow_config_action, self._get_airflow_config)
@@ -95,6 +104,13 @@ class MockCoreCharmCharm(ops.CharmBase):
             return
 
         self.unit.status = ops.ActiveStatus()
+
+    def _populate_api_server_relation(self, event: ops.RelationJoinedEvent) -> None:
+        """Populate api-server relation with host+port data."""
+        event.relation.data[self.app]["host"] = (
+            f"{self.app.name}-endpoints.{self.model.name}.svc.cluster.local"
+        )
+        event.relation.data[self.app]["port"] = "8080"
 
     def _check_ready(self, event: ops.ActionEvent) -> None:
         """Exposes whether relation indicates that the Airflow config can be written."""
