@@ -84,6 +84,63 @@ def test_missing_postgres_relation_data(
         assert relation.local_app_data == {}
 
 
+def test_missing_airflow_api_server_requires_relation(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.WAITING_FOR_API_SERVER_RELATION_MESSAGE
+    )
+
+    failures = json.dumps(
+        [
+            {
+                "component": "coordinator",
+                "code": airflow_coordinator.AirflowCoreValidationErrorEnum.WAITING_FOR_DEPENDENCIES,  # noqa: E501
+            }
+        ]
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {
+            "validation-failures": failures,
+        }
+
+
+def test_missing_airflow_api_server_requires_relation_data(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    missing_data_relation = dataclasses.replace(
+        airflow_api_server_requires_relation, remote_app_data={}
+    )
+
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    all_required_relations.append(missing_data_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.WaitingStatus(
+        constants.WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE
+    )
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        assert relation.local_app_data == {}
+
+
 def test_missing_core_charm_relations(
     context,
     state,

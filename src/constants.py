@@ -4,6 +4,7 @@
 """Constants to be used in the Airflow Coordiantor charm."""
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
+AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -19,6 +20,8 @@ WAITING_FOR_DATABASE_CONNECTION_MESSAGE = "Waiting for database connection info 
 WAITING_FOR_CONTAINER_MESSAGE = "Waiting for workload container"
 WAITING_FOR_PEER_RELATION_MESSAGE = "Waiting for peer relation"
 DB_MIGRATION_FAILED_MESSAGE = "Database migration failed"
+WAITING_FOR_API_SERVER_RELATION_MESSAGE = "Waiting for airflow_api_server interface integration"
+WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE = "Waiting for host+port information from api server"
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"

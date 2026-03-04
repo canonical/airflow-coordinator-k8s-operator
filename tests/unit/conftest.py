@@ -119,6 +119,17 @@ def postgres_relation():
 
 
 @pytest.fixture(scope="function")
+def airflow_api_server_requires_relation():
+    return ops.testing.Relation(
+        "airflow-api-server",
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,
     api_server_relation,
@@ -126,6 +137,7 @@ def all_required_relations(
     triggerer_relation,
     dag_processor_relation,
     peer_relation,
+    airflow_api_server_requires_relation,
 ):
     return [
         postgres_relation,
@@ -134,6 +146,7 @@ def all_required_relations(
         triggerer_relation,
         dag_processor_relation,
         peer_relation,
+        airflow_api_server_requires_relation,
     ]
 
 
