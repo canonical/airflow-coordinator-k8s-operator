@@ -172,12 +172,46 @@ LIBPATCH = 3
 logger = logging.getLogger(__name__)
 
 
-def write_airflow_config(
+def airflow_config_needs_update(
     container: ops.Container,
     config_path: str,
     config_template: str,
     sensitive_data: dict[str, str],
 ) -> bool:
+    """Check whether the rendered Airflow config differs from the file currently on disk.
+
+    Args:
+        container: The Pebble container to check the config in.
+        config_path: Path to the config file to compare against.
+        config_template: The Jinja2 template string for the Airflow config.
+        sensitive_data: Dictionary of sensitive values to render in the template.
+
+    Returns:
+        bool: True if the config needs to be written (content differs or file absent), else False.
+
+    Raises:
+        RuntimeError: If unable to connect to the container.
+    """
+    if not container.can_connect():
+        raise RuntimeError("Cannot connect to workload container")
+
+    try:
+        config = jinja2.Environment().from_string(config_template).render(**sensitive_data)
+
+        if container.exists(config_path) and container.pull(config_path).read() == config:
+            return False
+
+        return True
+    except Exception as e:
+        raise RuntimeError(f"Failed to check Airflow config: {e}") from e
+
+
+def write_airflow_config(
+    container: ops.Container,
+    config_path: str,
+    config_template: str,
+    sensitive_data: dict[str, str],
+) -> None:
     """Render and write the Airflow config to a container.
 
     This utility function can be used by both the coordinator charm (for db migrations)
@@ -189,9 +223,6 @@ def write_airflow_config(
         config_template: The Jinja2 template string for the Airflow config.
         sensitive_data: Dictionary of sensitive values to render in the template.
 
-    Returns:
-        bool: True if the file content changed and was written, else False.
-
     Raises:
         RuntimeError: If unable to connect to the container or write the config.
     """
@@ -201,10 +232,6 @@ def write_airflow_config(
     try:
         config = jinja2.Template(config_template).render(**sensitive_data)
 
-        if container.exists(config_path) and container.pull(config_path).read() == config:
-            logger.info("Airflow config at %s is unchanged; skipping write", config_path)
-            return False
-
         container.push(
             config_path,
             config,
@@ -213,7 +240,6 @@ def write_airflow_config(
             make_dirs=True,
         )
         logger.info("Successfully wrote Airflow config to %s", config_path)
-        return True
     except Exception as e:
         raise RuntimeError(f"Failed to write Airflow config: {e}") from e
 
@@ -944,16 +970,43 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             ]
         )
 
-    def write_airflow_config(self, config_path: str) -> bool:
-        """Render the Airflow config in the provided path in the workload container."""
-        provider_content = self._requirer_handler.provider_content
+    def _get_rendered_config(self) -> str:
+        """Render the Airflow config template, caching the result for this event lifecycle."""
+        if self._rendered_config_cache is None:
+            provider_content = self._requirer_handler.provider_content
+            self._rendered_config_cache = (
+                jinja2.Environment()
+                .from_string(provider_content.config_template)
+                .render(**json.loads(provider_content.sensitive_data))
+            )
+        return self._rendered_config_cache
 
-        return write_airflow_config(
-            self._workload_container,
+    def _get_on_disk_config(self, config_path: str) -> str | None:
+        """Read the on-disk config file content, caching the result for this event lifecycle."""
+        if config_path not in self._on_disk_config_cache:
+            if self._workload_container.exists(config_path):
+                self._on_disk_config_cache[config_path] = (
+                    self._workload_container.pull(config_path).read()
+                )
+            else:
+                self._on_disk_config_cache[config_path] = None
+        return self._on_disk_config_cache[config_path]
+
+    def airflow_config_needs_update(self, config_path: str) -> bool:
+        """Check whether the rendered Airflow config differs from the file currently on disk."""
+        return self._get_on_disk_config(config_path) != self._get_rendered_config()
+
+    def write_airflow_config(self, config_path: str) -> None:
+        """Render and write the Airflow config in the provided path in the workload container."""
+        rendered = self._get_rendered_config()
+        self._workload_container.push(
             config_path,
-            provider_content.config_template,
-            json.loads(provider_content.sensitive_data),
+            rendered,
+            user="root",
+            group="root",
+            make_dirs=True,
         )
+        logger.info("Successfully wrote Airflow config to %s", config_path)
 
     @property
     def can_write_kubernetes_executor_pod_spec(self) -> bool:

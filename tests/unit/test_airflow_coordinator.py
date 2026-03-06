@@ -10,6 +10,7 @@ import logging
 import pathlib
 import tempfile
 import typing
+import unittest.mock
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
@@ -627,7 +628,7 @@ class TestAirflowCoordinatorCoreRequires:
 
             assert manager.charm.requirer.can_write_airflow_config
 
-            config_changed = manager.charm.requirer.write_airflow_config("/config/path")
+            manager.charm.requirer.write_airflow_config("/config/path")
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context
@@ -639,42 +640,88 @@ class TestAirflowCoordinatorCoreRequires:
             assert config_file_path.is_file()
             assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
-            assert config_changed
+
+    def test_airflow_config_needs_update_returns_true_when_config_absent(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return True when the config file does not yet exist on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            assert manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+    def test_airflow_config_needs_update_returns_false_when_config_unchanged(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return False when the rendered config matches the file already on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            manager.charm.requirer.write_airflow_config("/config/path")
+            assert not manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+    def test_airflow_config_needs_update_returns_true_when_config_changed(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return True when the rendered config differs from the file already on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            manager.charm.unit.get_container("workload-container").push(
+                "/config/path",
+                "test-config: old-value",
+                make_dirs=True,
+            )
+
+            assert manager.charm.requirer.airflow_config_needs_update("/config/path")
 
     @pytest.mark.parametrize(
-        "file_exists, existing_content, expected_changed, expect_push",
+        "file_exists, existing_content, expected_needs_update",
         [
-            pytest.param(True, "test-config: s3cret", False, False, id="unchanged"),
-            pytest.param(True, "test-config: old", True, True, id="content_changes"),
-            pytest.param(False, None, True, True, id="file_missing"),
+            pytest.param(True, "test-config: s3cret", False, id="unchanged"),
+            pytest.param(True, "test-config: old", True, id="content_changes"),
+            pytest.param(False, None, True, id="file_missing"),
         ],
     )
-    def test_write_airflow_config_idempotent(
-        self, file_exists, existing_content, expected_changed, expect_push
+    def test_airflow_config_needs_update(
+        self, file_exists, existing_content, expected_needs_update
     ):
-        """Write config only when content differs; return True if written, False otherwise."""
-        from unittest.mock import Mock
-
-        pulled_file = Mock()
+        """Return True when config differs from disk or file is absent, False when unchanged."""
+        pulled_file = unittest.mock.Mock()
         pulled_file.read.return_value = existing_content
 
-        container = Mock()
+        container = unittest.mock.Mock()
         container.can_connect.return_value = True
         container.exists.return_value = file_exists
         container.pull.return_value = pulled_file
 
-        changed = airflow_coordinator.write_airflow_config(
+        needs_update = airflow_coordinator.airflow_config_needs_update(
             container=container,
             config_path="/config/path",
             config_template="test-config: {{ secret }}",
             sensitive_data={"secret": "s3cret"},
         )
 
-        assert changed is expected_changed
-        if expect_push:
-            container.push.assert_called_once()
-        else:
-            container.push.assert_not_called()
+        assert needs_update is expected_needs_update
+        container.push.assert_not_called()
 
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,
