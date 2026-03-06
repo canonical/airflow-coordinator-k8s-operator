@@ -59,9 +59,12 @@ class CommandExecutor:
             process = self._container.exec(
                 ["airflow", "db", "migrate"],
                 environment={
-                    "AIRFLOW_HOME": "/",
-                    "AIRFLOW__CORE__DAGS_FOLDER": "/dags",
+                    "AIRFLOW_HOME": "/opt/airflow",
+                    "AIRFLOW_CONFIG": "/airflow.cfg",
+                    "AIRFLOW__CORE__DAGS_FOLDER": "/opt/airflow/dags",
                 },
+                user="ubuntu",
+                group="ubuntu",
             )
             stdout, stderr = process.wait_output()
 

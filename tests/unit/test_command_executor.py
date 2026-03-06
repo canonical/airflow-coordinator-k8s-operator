@@ -40,7 +40,13 @@ class TestCommandExecutor:
 
         mock_container.exec.assert_called_once_with(
             ["airflow", "db", "migrate"],
-            environment={"AIRFLOW_HOME": "/", "AIRFLOW__CORE__DAGS_FOLDER": "/dags"},
+            environment={
+                "AIRFLOW_HOME": "/opt/airflow",
+                "AIRFLOW_CONFIG": "/airflow.cfg",
+                "AIRFLOW__CORE__DAGS_FOLDER": "/opt/airflow/dags",
+            },
+            user="ubuntu",
+            group="ubuntu",
         )
 
     def test_run_db_migrate_not_connected(self, executor, mock_container):

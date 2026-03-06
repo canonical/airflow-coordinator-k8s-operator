@@ -14,6 +14,7 @@ import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordina
 import ops
 import ops.testing
 import pytest
+import unittest
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +417,12 @@ class TestAirflowCoordinatorRequires:
 
             assert manager.charm.requirer.can_write_airflow_config
 
-            manager.charm.requirer.write_airflow_config("/config/path")
+            with unittest.mock.patch.object(
+                airflow_coordinator.AirflowCoordinatorRequires,
+                "_setup_workload_permissions",
+                return_value=None,
+            ):
+                manager.charm.requirer.write_airflow_config("/config/path")
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context

@@ -232,6 +232,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._config_generator.sensitive_config_values,
         )
 
+    def _setup_workload_permissions(self) -> None:
+        """Ensure Airflow directories exist with correct ownership.
+
+        The rock's AIRFLOW_HOME (/opt/airflow) is owned by root.
+        Recursively chown it to the workload user so that
+        'airflow db migrate' can write runtime data.
+        """
+        self._container.exec(["chown", "-R", "ubuntu:ubuntu", "/opt/airflow"]).wait()
+
     def _run_db_migrate(self) -> None:
         """Run database migration in the workload container."""
         result = self._command_executor.run_db_migrate()
@@ -254,6 +263,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # TODO: once we have upgrade logic, we'll need to change the
             # conditions under which this state will be True/False.
             if not self._db_migration_ran:
+                self._setup_workload_permissions()
                 self._run_db_migrate()
                 self._db_migration_ran = True
 
