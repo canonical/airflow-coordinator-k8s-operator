@@ -9,12 +9,12 @@ import json
 import logging
 import pathlib
 import typing
+import unittest
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
 import pytest
-import unittest
 
 logger = logging.getLogger(__name__)
 
