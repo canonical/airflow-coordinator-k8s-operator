@@ -8,6 +8,7 @@ import dataclasses
 import json
 import logging
 import pathlib
+import tempfile
 import typing
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -382,41 +383,41 @@ class TestAirflowCoordinatorRequires:
         base_requires_context,
         base_application_state,
         application_airflow_coordinator_relation,
-        tmp_path,
     ):
-        config_path = str(tmp_path / "config" / "airflow.cfg")
+        with tempfile.NamedTemporaryFile(suffix=".cfg") as tmp_file:
+            config_path = tmp_file.name
 
-        with base_requires_context(
-            base_requires_context.on.relation_changed(
-                application_airflow_coordinator_relation
-            ),
-            base_application_state,
-        ) as manager:
-            manager.run()
-            manager.charm.requirer.write_airflow_config(config_path)
+            with base_requires_context(
+                base_requires_context.on.relation_changed(
+                    application_airflow_coordinator_relation
+                ),
+                base_application_state,
+            ) as manager:
+                manager.run()
+                manager.charm.requirer.write_airflow_config(config_path)
 
-        assert pathlib.Path(config_path).exists()
-        assert pathlib.Path(config_path).read_text() == "test-config: s3cret"
+            assert pathlib.Path(config_path).exists()
+            assert pathlib.Path(config_path).read_text() == "test-config: s3cret"
 
     def test_write_airflow_config_creates_parent_directories(
         self,
         base_requires_context,
         base_application_state,
         application_airflow_coordinator_relation,
-        tmp_path,
     ):
-        config_path = str(tmp_path / "deeply" / "nested" / "dir" / "airflow.cfg")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = str(pathlib.Path(tmp_dir) / "deeply" / "nested" / "dir" / "airflow.cfg")
 
-        with base_requires_context(
-            base_requires_context.on.relation_changed(
-                application_airflow_coordinator_relation
-            ),
-            base_application_state,
-        ) as manager:
-            manager.run()
-            manager.charm.requirer.write_airflow_config(config_path)
+            with base_requires_context(
+                base_requires_context.on.relation_changed(
+                    application_airflow_coordinator_relation
+                ),
+                base_application_state,
+            ) as manager:
+                manager.run()
+                manager.charm.requirer.write_airflow_config(config_path)
 
-        assert pathlib.Path(config_path).exists()
+            assert pathlib.Path(config_path).exists()
 
     def test_provider_content_returns_model_with_valid_data(
         self,

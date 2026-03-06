@@ -812,7 +812,7 @@ class AirflowCoordinatorRequires(ops.Object):
         This check ensures the coordinator has shared relevant config data
         in the relation and that the relation exists.
         """
-        content = self._requirer_handler.provider_content
+        content = self.provider_content
         return bool(content and content.config_template and content.sensitive_data)
 
     def write_airflow_config(self, config_path: str) -> None:
@@ -825,7 +825,7 @@ class AirflowCoordinatorRequires(ops.Object):
             config_path: the path where the configuration file will be saved.
         """
 
-        provider_content = self._requirer_handler.provider_content
+        provider_content = self.provider_content
         config = jinja2.Template(provider_content.config_template).render(
             **json.loads(provider_content.sensitive_data)
         )
