@@ -147,6 +147,7 @@ import collections
 import enum
 import json
 import logging
+import pathlib
 import pickle
 import typing
 
@@ -823,7 +824,6 @@ class AirflowCoordinatorRequires(ops.Object):
         Args:
             config_path: the path where the configuration file will be saved.
         """
-        import pathlib
 
         provider_content = self._requirer_handler.provider_content
         config = jinja2.Template(provider_content.config_template).render(
