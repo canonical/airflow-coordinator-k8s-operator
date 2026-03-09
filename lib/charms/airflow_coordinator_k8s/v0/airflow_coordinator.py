@@ -121,7 +121,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 # TODO: add your code here! Happy coding!
 
@@ -397,7 +397,7 @@ class AirflowCoordinatorRequirerEventHandler(
         if (
             "config-template" in _diff.changed
             or "kubernetes-executor-pod-spec" in _diff.changed
-            or "sensitive_data" in _diff.changed
+            or "sensitive-data" in _diff.changed
         ):
             getattr(self.on, "airflow_config_updated").emit(
                 event.relation, app=event.app, unit=event.unit, content=content
