@@ -59,7 +59,6 @@ class CommandExecutor:
             process = self._container.exec(
                 ["airflow", "db", "migrate"],
                 environment={
-                    "AIRFLOW_HOME": "/opt/airflow",
                     "AIRFLOW__CORE__DAGS_FOLDER": "/opt/airflow/dags",
                 },
             )
