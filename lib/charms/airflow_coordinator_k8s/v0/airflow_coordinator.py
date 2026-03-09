@@ -824,7 +824,6 @@ class AirflowCoordinatorRequires(ops.Object):
         Args:
             config_path: the path where the configuration file will be saved.
         """
-
         provider_content = self.provider_content
         config = jinja2.Template(provider_content.config_template).render(
             **json.loads(provider_content.sensitive_data)
