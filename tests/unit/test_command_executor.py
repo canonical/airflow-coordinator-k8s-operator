@@ -41,7 +41,7 @@ class TestCommandExecutor:
         mock_container.exec.assert_called_once_with(
             ["airflow", "db", "migrate"],
             environment={
-                "AIRFLOW__CORE__DAGS_FOLDER": "/opt/airflow/dags",
+                "AIRFLOW_HOME": "/opt/airflow",
             },
         )
 
