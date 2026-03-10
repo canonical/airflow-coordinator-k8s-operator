@@ -1119,7 +1119,6 @@ class AirflowCoordinatorProvides(ops.Object):
         config_template: typing.Optional[str] = None,
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
-        executor_config: typing.Optional[dict] = None,
     ) -> None:
         """Update config with related core charms.
 
@@ -1128,15 +1127,9 @@ class AirflowCoordinatorProvides(ops.Object):
             k8s_executor_pod_spec_template: (optional) K8s executor pod spec template.
             sensitive_data: sensitive data to render config of k8s executor pod
                 spec jinja templates with.
-            executor_config: Airflow config as a dict of section -> key/value pairs
-                (e.g. {"executor": {"default_queue": "kubernetes"}}). Serialised to
-                JSON and stored in the relation databag. Takes precedence over
-                config_template when both are provided.
         """
-        template = json.dumps(executor_config) if executor_config is not None else config_template
-
         self._provider_handler.update_content(
-            config_template=template,
+            config_template=config_template,
             kubernetes_executor_pod_spec=k8s_executor_pod_spec_template,
             sensitive_data=sensitive_data,
         )
