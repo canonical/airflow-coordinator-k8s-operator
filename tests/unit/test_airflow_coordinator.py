@@ -417,12 +417,7 @@ class TestAirflowCoordinatorRequires:
 
             assert manager.charm.requirer.can_write_airflow_config
 
-            with unittest.mock.patch.object(
-                airflow_coordinator.AirflowCoordinatorRequires,
-                "_setup_workload_permissions",
-                return_value=None,
-            ):
-                manager.charm.requirer.write_airflow_config("/config/path")
+            manager.charm.requirer.write_airflow_config("/config/path")
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context
