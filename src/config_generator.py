@@ -58,4 +58,5 @@ class AirflowConfigGenerator:
         """All sensitive values that will be included in the Airflow config template."""
         return {
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
+            "jwt_secret": self._charm._jwt_secret,
         }

@@ -5,6 +5,7 @@
 """The Airflow Coordinator charm application."""
 
 import logging
+import secrets
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -127,6 +128,19 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.WAITING_FOR_PEER_RELATION_MESSAGE, ops.WaitingStatus
             )
         return peer_relation
+
+    @property
+    def _jwt_secret(self) -> str:
+        """Get or generate the JWT secret for API authentication.
+
+        When running multiple instances of the API server, all must use the same
+        jwt_secret for authentication to work correctly.
+        """
+        secret = self._peer_relation.data[self.app].get("jwt_secret")
+        if not secret:
+            secret = secrets.token_hex(32)
+            self._peer_relation.data[self.app]["jwt_secret"] = secret
+        return secret
 
     @property
     def _db_migration_ran(self) -> bool:
