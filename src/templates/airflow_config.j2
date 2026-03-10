@@ -9,11 +9,15 @@ sql_alchemy_conn = {{ sql_alchemy_connection_string }}
 [api]
 base_url = {{ api_server_base_url }}
 port = {{ api_server_port }}
+# secret_key must be identical across all API server units in HA mode.
+# It is used for CSRF token generation and session signing. Without a consistent
+# value, CSRF validation will fail when a request is served by a different unit
+# than the one that issued the token. Also critical for Celery executor message signing.
+secret_key = {{ secret_key }}
 
-<<<<<<< Updated upstream
-[logging]
-base_log_folder = logs
-=======
 [api_auth]
+# jwt_secret must be identical across all API server units in HA mode.
+# It is the secret key used to encode and decode JWTs for API authentication.
+# Without a consistent value, a JWT issued by one unit will fail authentication
+# when validated by another unit, breaking all cross-unit API calls.
 jwt_secret = {{ jwt_secret }}
->>>>>>> Stashed changes

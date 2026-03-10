@@ -130,11 +130,28 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return peer_relation
 
     @property
+    def _secret_key(self) -> str:
+        """Get or generate the secret key for CSRF and session signing.
+
+        Must be identical across all API server units in HA mode.
+        Used for CSRF token generation, session cookie signing, and
+        Celery executor message signing. If inconsistent, CSRF validation
+        and session verification will fail across units.
+        """
+        secret = self._peer_relation.data[self.app].get("secret_key")
+        if not secret:
+            secret = secrets.token_hex(32)
+            self._peer_relation.data[self.app]["secret_key"] = secret
+        return secret
+
+    @property
     def _jwt_secret(self) -> str:
         """Get or generate the JWT secret for API authentication.
 
-        When running multiple instances of the API server, all must use the same
-        jwt_secret for authentication to work correctly.
+        Must be identical across all API server units in HA mode.
+        Used to encode and decode JWTs for public and private API
+        authentication. If inconsistent, JWTs issued by one unit will
+        fail validation on another, breaking cross-unit API calls.
         """
         secret = self._peer_relation.data[self.app].get("jwt_secret")
         if not secret:
