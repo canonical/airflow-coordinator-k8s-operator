@@ -172,40 +172,6 @@ LIBPATCH = 3
 logger = logging.getLogger(__name__)
 
 
-def airflow_config_needs_update(
-    container: ops.Container,
-    config_path: str,
-    config_template: str,
-    sensitive_data: dict[str, str],
-) -> bool:
-    """Check whether the rendered Airflow config differs from the file currently on disk.
-
-    Args:
-        container: The Pebble container to check the config in.
-        config_path: Path to the config file to compare against.
-        config_template: The Jinja2 template string for the Airflow config.
-        sensitive_data: Dictionary of sensitive values to render in the template.
-
-    Returns:
-        bool: True if the config needs to be written (content differs or file absent), else False.
-
-    Raises:
-        RuntimeError: If unable to connect to the container.
-    """
-    if not container.can_connect():
-        raise RuntimeError("Cannot connect to workload container")
-
-    try:
-        config = jinja2.Environment().from_string(config_template).render(**sensitive_data)
-
-        if container.exists(config_path) and container.pull(config_path).read() == config:
-            return False
-
-        return True
-    except Exception as e:
-        raise RuntimeError(f"Failed to check Airflow config: {e}") from e
-
-
 def write_airflow_config(
     container: ops.Container,
     config_path: str,
