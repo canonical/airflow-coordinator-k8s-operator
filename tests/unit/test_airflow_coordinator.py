@@ -8,6 +8,7 @@ import dataclasses
 import json
 import logging
 import pathlib
+import tempfile
 import typing
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -20,13 +21,29 @@ logger = logging.getLogger(__name__)
 AIRFLOW_COORDINATOR_RELATION_INTERFACE = "airflow-coordinator"
 
 
-class AirflowCoreApplicationCharm(ops.CharmBase):
-    """Mock application charm to enable testing Airflow Coordinator charm libs."""
+class AirflowCoordinatorBaseRequiresCharm(ops.CharmBase):
+    """Mock charm using AirflowCoordinatorRequires (base class, no workload container)."""
 
     def __init__(self, *args):
         super().__init__(*args)
 
         self.requirer = airflow_coordinator.AirflowCoordinatorRequires(
+            self,
+            AIRFLOW_COORDINATOR_RELATION_INTERFACE,
+            callback=self.reconcile,
+        )
+
+    def reconcile(self, event) -> None:
+        logger.info(f"§BaseRequirer reacting to event: {type(event)}")
+
+
+class AirflowCoreApplicationCharm(ops.CharmBase):
+    """Mock core charm using AirflowCoordinatorCoreRequires."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+
+        self.requirer = airflow_coordinator.AirflowCoordinatorCoreRequires(
             self,
             AIRFLOW_COORDINATOR_RELATION_INTERFACE,
             component="scheduler",
@@ -77,31 +94,6 @@ class AirflowCoordianatorCharmWaiting(AirflowCoordianatorCharmBase):
 
     def dependencies_check_callable(self) -> bool:
         return False
-
-
-@pytest.fixture(scope="function")
-def application_context():
-    return ops.testing.Context(
-        charm_type=AirflowCoreApplicationCharm,
-        meta={
-            "name": "airflow-core-application",
-            "containers": {
-                "workload-container": {
-                    "resource": "workload-container-image",
-                    "channel": "latest/edge",
-                    "architectures": [
-                        "amd64",
-                    ],
-                },
-            },
-            "requires": {
-                "airflow-coordinator": {
-                    "interface": "airflow_coordinator",
-                    "limit": 1,
-                },
-            },
-        },
-    )
 
 
 @pytest.fixture(scope="function")
@@ -189,7 +181,63 @@ def valid_relation_data(coordinator_relation_secret):
 @pytest.fixture(scope="function")
 def application_airflow_coordinator_relation(valid_relation_data):
     return ops.testing.Relation(
-        "airflow-coordinator", interface="airflow_coordinator", remote_app_data=valid_relation_data
+        "airflow-coordinator",
+        interface="airflow_coordinator",
+        remote_app_data=valid_relation_data,
+    )
+
+
+@pytest.fixture(scope="function")
+def base_requires_context():
+    return ops.testing.Context(
+        charm_type=AirflowCoordinatorBaseRequiresCharm,
+        meta={
+            "name": "airflow-base-requires-application",
+            "requires": {
+                "airflow-coordinator": {
+                    "interface": "airflow_coordinator",
+                    "limit": 1,
+                },
+            },
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def base_application_state(
+    application_airflow_coordinator_relation,
+    coordinator_relation_secret,
+):
+    """State for the base requires charm — no workload container."""
+    return ops.testing.State(
+        leader=True,
+        relations=[application_airflow_coordinator_relation],
+        secrets=[coordinator_relation_secret],
+    )
+
+
+@pytest.fixture(scope="function")
+def application_context():
+    return ops.testing.Context(
+        charm_type=AirflowCoreApplicationCharm,
+        meta={
+            "name": "airflow-core-application",
+            "containers": {
+                "workload-container": {
+                    "resource": "workload-container-image",
+                    "channel": "latest/edge",
+                    "architectures": [
+                        "amd64",
+                    ],
+                },
+            },
+            "requires": {
+                "airflow-coordinator": {
+                    "interface": "airflow_coordinator",
+                    "limit": 1,
+                },
+            },
+        },
     )
 
 
@@ -246,7 +294,9 @@ def coordinator_waiting_context():
 
 
 def core_charm_relation(
-    component: str, airflow_version: str = "3.1.0", workload_image_hash: str = "somehash"
+    component: str,
+    airflow_version: str = "3.1.0",
+    workload_image_hash: str = "somehash",
 ) -> ops.testing.Relation:
     return ops.testing.Relation(
         "airflow-coordinator",
@@ -277,38 +327,188 @@ def generate_coordinator_state(
 
 
 class TestAirflowCoordinatorRequires:
+    def test_core_requires_is_subclass(self):
+        assert issubclass(
+            airflow_coordinator.AirflowCoordinatorCoreRequires,
+            airflow_coordinator.AirflowCoordinatorRequires,
+        )
+
+    def test_initializes_without_error_when_no_relation_exists(
+        self, base_requires_context
+    ):
+        """Charm initializes cleanly when no airflow-coordinator relation is present."""
+        state = ops.testing.State(leader=True)
+        state_out = base_requires_context.run(base_requires_context.on.start(), state)
+        assert state_out is not None
+
+    def test_can_write_airflow_config_with_valid_data(
+        self,
+        base_requires_context,
+        base_application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with base_requires_context(
+            base_requires_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
+            base_application_state,
+        ) as manager:
+            manager.run()
+            assert manager.charm.requirer.can_write_airflow_config
+
+    def test_can_write_airflow_config_returns_false_with_no_content(
+        self,
+        base_requires_context,
+        application_airflow_coordinator_relation,
+        coordinator_relation_secret,
+    ):
+        empty_relation = dataclasses.replace(
+            application_airflow_coordinator_relation, remote_app_data={}
+        )
+        state = ops.testing.State(
+            leader=True,
+            relations=[empty_relation],
+            secrets=[coordinator_relation_secret],
+        )
+
+        with base_requires_context(
+            base_requires_context.on.relation_changed(empty_relation),
+            state,
+        ) as manager:
+            manager.run()
+            assert not manager.charm.requirer.can_write_airflow_config
+
+    def test_write_airflow_config_writes_to_local_filesystem(
+        self,
+        base_requires_context,
+        base_application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with tempfile.NamedTemporaryFile(suffix=".cfg") as tmp_file:
+            config_path = tmp_file.name
+
+            with base_requires_context(
+                base_requires_context.on.relation_changed(
+                    application_airflow_coordinator_relation
+                ),
+                base_application_state,
+            ) as manager:
+                manager.run()
+                manager.charm.requirer.write_airflow_config(config_path)
+
+            assert pathlib.Path(config_path).exists()
+            assert pathlib.Path(config_path).read_text() == "test-config: s3cret"
+
+    def test_write_airflow_config_creates_parent_directories(
+        self,
+        base_requires_context,
+        base_application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = str(pathlib.Path(tmp_dir) / "deeply" / "nested" / "dir" / "airflow.cfg")
+
+            with base_requires_context(
+                base_requires_context.on.relation_changed(
+                    application_airflow_coordinator_relation
+                ),
+                base_application_state,
+            ) as manager:
+                manager.run()
+                manager.charm.requirer.write_airflow_config(config_path)
+
+            assert pathlib.Path(config_path).exists()
+
+    def test_provider_content_returns_model_with_valid_data(
+        self,
+        base_requires_context,
+        base_application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with base_requires_context(
+            base_requires_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
+            base_application_state,
+        ) as manager:
+            manager.run()
+            content = manager.charm.requirer.provider_content
+            assert content is not None
+            assert content.config_template == "test-config: {{ secret }}"
+            assert content.kubernetes_executor_pod_spec == "test-pod-spec: {{ secret }}"
+
+    def test_provider_content_has_no_config_with_empty_databag(
+        self,
+        base_requires_context,
+        application_airflow_coordinator_relation,
+        coordinator_relation_secret,
+    ):
+        """All provider model fields are optional: an empty databag returns an all-None model."""
+        empty_relation = dataclasses.replace(
+            application_airflow_coordinator_relation, remote_app_data={}
+        )
+        state = ops.testing.State(
+            leader=True,
+            relations=[empty_relation],
+            secrets=[coordinator_relation_secret],
+        )
+
+        with base_requires_context(
+            base_requires_context.on.relation_changed(empty_relation),
+            state,
+        ) as manager:
+            manager.run()
+            content = manager.charm.requirer.provider_content
+            assert content is not None
+            assert content.config_template is None
+            assert content.sensitive_data is None
+
+
+class TestAirflowCoordinatorCoreRequires:
     def get_juju_log_line(self, log_level: str, event: ops.EventBase):
         return ops.testing.JujuLogLine(
             level=log_level, message=f"§Requirer reacting to event: {event}"
         )
 
     def test_airflow_core_validation_failures(
-        self, application_context, application_state, application_airflow_coordinator_relation
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
     ):
         with application_context(
-            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
             application_state,
         ) as manager:
             manager.run()
             assert (
-                self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigAvailableEvent)
+                self.get_juju_log_line(
+                    "INFO", airflow_coordinator.AirflowConfigAvailableEvent
+                )
                 in application_context.juju_log
             )
 
             assert len(manager.charm.requirer.airflow_core_validation_failures) == 0
 
     def test_validation_failure_messages(
-        self, application_context, application_state, application_airflow_coordinator_relation
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
     ):
         with application_context(
-            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
             application_state,
         ) as manager:
             manager.run()
 
             assert len(manager.charm.requirer.validation_failure_messages) == 0
 
-    def test_missing_postgres_relation(
+    def test_waiting_for_dependencies_sets_not_ready(
         self,
         application_context,
         application_state,
@@ -337,7 +537,9 @@ class TestAirflowCoordinatorRequires:
             assert sorted(manager.charm.requirer.validation_failure_messages) == [
                 failure["code"]
                 for failure in json.loads(
-                    coordinator_awaiting_dependencies_relation_data["validation-failures"]
+                    coordinator_awaiting_dependencies_relation_data[
+                        "validation-failures"
+                    ]
                 )
             ]
 
@@ -366,16 +568,19 @@ class TestAirflowCoordinatorRequires:
 
             assert sorted(manager.charm.requirer.airflow_core_validation_failures) == [
                 failure["code"]
-                for failure in json.loads(missing_components_relation_data["validation-failures"])
+                for failure in json.loads(
+                    missing_components_relation_data["validation-failures"]
+                )
             ]
 
-    def test_validation_failure_messages_with_missing_components_failures(
+    def test_validation_failure_messages_only_include_own_component(
         self,
         application_context,
         application_state,
         application_airflow_coordinator_relation,
         missing_components_relation_data,
     ):
+        """Only failures for the charm's component (scheduler) are surfaced."""
         relation_missing_commponents = dataclasses.replace(
             application_airflow_coordinator_relation,
             remote_app_data=missing_components_relation_data,
@@ -394,23 +599,29 @@ class TestAirflowCoordinatorRequires:
 
             assert sorted(manager.charm.requirer.validation_failure_messages) == [
                 failure["code"]
-                for failure in json.loads(missing_components_relation_data["validation-failures"])
+                for failure in json.loads(
+                    missing_components_relation_data["validation-failures"]
+                )
                 if failure["component"] == "scheduler"
             ]
 
-    def test_write_airflow_config(
+    def test_write_airflow_config_to_workload_container(
         self,
         application_context,
         application_state,
         application_airflow_coordinator_relation,
     ):
         with application_context(
-            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
             application_state,
         ) as manager:
             state_out = manager.run()
             assert (
-                self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigAvailableEvent)
+                self.get_juju_log_line(
+                    "INFO", airflow_coordinator.AirflowConfigAvailableEvent
+                )
                 in application_context.juju_log
             )
 
@@ -429,7 +640,7 @@ class TestAirflowCoordinatorRequires:
             assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
 
-    def test_can_write_airflow_config_with_mismatched_airflow_version_failures(
+    def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,
         application_context,
         application_state,
@@ -445,7 +656,9 @@ class TestAirflowCoordinatorRequires:
         )
 
         with application_context(
-            application_context.on.relation_changed(relation_mismatched_airflow_versions),
+            application_context.on.relation_changed(
+                relation_mismatched_airflow_versions
+            ),
             state_mismatched_airflow_versions,
         ) as manager:
             manager.run()
@@ -458,7 +671,7 @@ class TestAirflowCoordinatorRequires:
 
             assert not manager.charm.requirer.can_write_airflow_config
 
-    def test_can_write_airflow_config_with_mismatched_workload_image_hash(
+    def test_can_write_airflow_config_blocked_by_mismatched_workload_image_hash(
         self,
         application_context,
         application_state,
@@ -474,7 +687,9 @@ class TestAirflowCoordinatorRequires:
         )
 
         with application_context(
-            application_context.on.relation_changed(relation_mismatched_workload_image_hash),
+            application_context.on.relation_changed(
+                relation_mismatched_workload_image_hash
+            ),
             state_mismatched_airflow_versions,
         ) as manager:
             manager.run()
@@ -487,16 +702,67 @@ class TestAirflowCoordinatorRequires:
 
             assert not manager.charm.requirer.can_write_airflow_config
 
-    def test_write_k8s_executor_pod_spec(
-        self, application_context, application_state, application_airflow_coordinator_relation
+    def test_can_write_airflow_config_blocked_when_container_not_connectable(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        application_workload_container,
+    ):
+        container_not_ready = dataclasses.replace(
+            application_workload_container, can_connect=False
+        )
+        state = dataclasses.replace(application_state, containers=[container_not_ready])
+
+        with application_context(
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
+            state,
+        ) as manager:
+            manager.run()
+            assert not manager.charm.requirer.can_write_airflow_config
+
+    def test_can_write_airflow_config_blocked_by_missing_core_components(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        missing_components_relation_data,
+    ):
+        relation_missing_components = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data=missing_components_relation_data,
+        )
+        state_missing_components = dataclasses.replace(
+            application_state, relations=[relation_missing_components]
+        )
+
+        with application_context(
+            application_context.on.relation_changed(relation_missing_components),
+            state_missing_components,
+        ) as manager:
+            manager.run()
+            assert manager.charm.requirer.missing_core_components_exist
+            assert not manager.charm.requirer.can_write_airflow_config
+
+    def test_write_k8s_executor_pod_spec_to_workload_container(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
     ):
         with application_context(
-            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
             application_state,
         ) as manager:
             state_out = manager.run()
             assert (
-                self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigAvailableEvent)
+                self.get_juju_log_line(
+                    "INFO", airflow_coordinator.AirflowConfigAvailableEvent
+                )
                 in application_context.juju_log
             )
 
@@ -510,14 +776,18 @@ class TestAirflowCoordinatorRequires:
                 application_context
             )
 
-            config_file_path = pathlib.Path(f"{filesystem.absolute()}/k8s_executor_pod_spec/path")
+            config_file_path = pathlib.Path(
+                f"{filesystem.absolute()}/k8s_executor_pod_spec/path"
+            )
 
             assert config_file_path.exists()
             assert config_file_path.is_file()
-            assert config_file_path.read_text(encoding="utf-8") == "test-pod-spec: s3cret"
+            assert (
+                config_file_path.read_text(encoding="utf-8") == "test-pod-spec: s3cret"
+            )
             assert config_file_path.stat().st_mode & 0o777 == 0o644
 
-    def test_can_write_k8s_executor_pod_spec_with_mismatched_airflow_version_failures(
+    def test_can_write_k8s_executor_pod_spec_blocked_by_mismatched_airflow_version(
         self,
         application_context,
         application_state,
@@ -533,7 +803,9 @@ class TestAirflowCoordinatorRequires:
         )
 
         with application_context(
-            application_context.on.relation_changed(relation_mismatched_airflow_versions),
+            application_context.on.relation_changed(
+                relation_mismatched_airflow_versions
+            ),
             state_mismatched_airflow_versions,
         ) as manager:
             manager.run()
@@ -546,7 +818,7 @@ class TestAirflowCoordinatorRequires:
 
             assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
-    def test_can_write_k8s_executor_pod_spec_with_mismatched_workload_image_hash(
+    def test_can_write_k8s_executor_pod_spec_blocked_by_mismatched_workload_image_hash(
         self,
         application_context,
         application_state,
@@ -562,7 +834,9 @@ class TestAirflowCoordinatorRequires:
         )
 
         with application_context(
-            application_context.on.relation_changed(relation_mismatched_workload_image_hash),
+            application_context.on.relation_changed(
+                relation_mismatched_workload_image_hash
+            ),
             state_mismatched_airflow_versions,
         ) as manager:
             manager.run()
@@ -573,6 +847,27 @@ class TestAirflowCoordinatorRequires:
                 in application_context.juju_log
             )
 
+            assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
+
+    def test_can_write_k8s_executor_pod_spec_blocked_when_container_not_connectable(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        application_workload_container,
+    ):
+        container_not_ready = dataclasses.replace(
+            application_workload_container, can_connect=False
+        )
+        state = dataclasses.replace(application_state, containers=[container_not_ready])
+
+        with application_context(
+            application_context.on.relation_changed(
+                application_airflow_coordinator_relation
+            ),
+            state,
+        ) as manager:
+            manager.run()
             assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
 
@@ -586,7 +881,9 @@ class TestAirflowCoordinatorProvides:
         state = generate_coordinator_state()
 
         with coordinator_context(
-            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            coordinator_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
             state,
         ) as manager:
             state_out = manager.run()
@@ -624,7 +921,9 @@ class TestAirflowCoordinatorProvides:
             manager.charm.provider.set_validation_errors()
 
             for relation in state_out.relations:
-                validation_failures = json.loads(relation.local_app_data["validation-failures"])
+                validation_failures = json.loads(
+                    relation.local_app_data["validation-failures"]
+                )
 
                 assert validation_failures == [
                     {
@@ -638,14 +937,22 @@ class TestAirflowCoordinatorProvides:
     ):
         missing_components = {
             failure["component"]
-            for failure in json.loads(missing_components_relation_data["validation-failures"])
+            for failure in json.loads(
+                missing_components_relation_data["validation-failures"]
+            )
         }
-        present_components = set(airflow_coordinator.AirflowCoreComponentEnum) - missing_components
+        present_components = (
+            set(airflow_coordinator.AirflowCoreComponentEnum) - missing_components
+        )
 
-        state = generate_coordinator_state({component: {} for component in present_components})
+        state = generate_coordinator_state(
+            {component: {} for component in present_components}
+        )
 
         with coordinator_context(
-            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            coordinator_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
             state,
         ) as manager:
             state_out = manager.run()
@@ -671,19 +978,25 @@ class TestAirflowCoordinatorProvides:
     ):
         invalid_components = {
             failure["component"]
-            for failure in json.loads(invalid_airflow_version_relation_data["validation-failures"])
+            for failure in json.loads(
+                invalid_airflow_version_relation_data["validation-failures"]
+            )
         }
 
         component_permutations = {
             component: {"airflow_version": "0.0.0"} for component in invalid_components
         }
-        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
+        for component in (
+            set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components
+        ):
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)
 
         with coordinator_context(
-            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            coordinator_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
             state,
         ) as manager:
             state_out = manager.run()
@@ -717,15 +1030,20 @@ class TestAirflowCoordinatorProvides:
         }
 
         component_permutations = {
-            component: {"workload_image_hash": "0.0.0"} for component in invalid_components
+            component: {"workload_image_hash": "0.0.0"}
+            for component in invalid_components
         }
-        for component in set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components:
+        for component in (
+            set(airflow_coordinator.AirflowCoreComponentEnum) - invalid_components
+        ):
             component_permutations[component] = {}
 
         state = generate_coordinator_state(component_permutations)
 
         with coordinator_context(
-            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            coordinator_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
             state,
         ) as manager:
             state_out = manager.run()
@@ -752,7 +1070,9 @@ class TestAirflowCoordinatorProvides:
         state = generate_coordinator_state()
 
         with coordinator_context(
-            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            coordinator_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
             state,
         ) as manager:
             airflow_config_params = {
@@ -763,7 +1083,10 @@ class TestAirflowCoordinatorProvides:
                 },
             }
 
-            assert manager.charm.provider.set_airflow_config(**airflow_config_params) is None
+            assert (
+                manager.charm.provider.set_airflow_config(**airflow_config_params)
+                is None
+            )
 
             state_out = manager.run()
             assert (
@@ -789,5 +1112,7 @@ class TestAirflowCoordinatorProvides:
                 assert secret_id is not None
 
                 assert state_out.get_secret(id=secret_id).latest_content == {
-                    "sensitive-data": json.dumps(airflow_config_params["sensitive_data"])
+                    "sensitive-data": json.dumps(
+                        airflow_config_params["sensitive_data"]
+                    )
                 }

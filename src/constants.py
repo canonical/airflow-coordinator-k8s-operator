@@ -12,7 +12,7 @@ POSTGRES_RELATION_NAME = "postgres"
 AIRFLOW_DATABASE_NAME = "airflow"
 
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
-AIRFLOW_CONFIG_PATH = "/airflow.cfg"
+AIRFLOW_CONFIG_PATH = "/opt/airflow/airflow.cfg"
 
 MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
 WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
