@@ -28,7 +28,7 @@ class MockCoreCharmCharm(ops.CharmBase):
             config in self.config
             for config in ["component", "airflow_version", "workload_image_hash"]
         ):
-            self.config_requirer = airflow_coordinator.AirflowCoordinatorRequires(
+            self.config_requirer = airflow_coordinator.AirflowCoordinatorCoreRequires(
                 self,
                 AIRFLOW_COORDINATOR_RELATION_NAME,
                 self.config["component"],
