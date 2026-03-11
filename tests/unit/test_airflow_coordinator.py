@@ -692,36 +692,6 @@ class TestAirflowCoordinatorCoreRequires:
 
             assert manager.charm.requirer.airflow_config_needs_update("/config/path")
 
-    @pytest.mark.parametrize(
-        "file_exists, existing_content, expected_needs_update",
-        [
-            pytest.param(True, "test-config: s3cret", False, id="unchanged"),
-            pytest.param(True, "test-config: old", True, id="content_changes"),
-            pytest.param(False, None, True, id="file_missing"),
-        ],
-    )
-    def test_airflow_config_needs_update(
-        self, file_exists, existing_content, expected_needs_update
-    ):
-        """Return True when config differs from disk or file is absent, False when unchanged."""
-        pulled_file = unittest.mock.Mock()
-        pulled_file.read.return_value = existing_content
-
-        container = unittest.mock.Mock()
-        container.can_connect.return_value = True
-        container.exists.return_value = file_exists
-        container.pull.return_value = pulled_file
-
-        needs_update = airflow_coordinator.airflow_config_needs_update(
-            container=container,
-            config_path="/config/path",
-            config_template="test-config: {{ secret }}",
-            sensitive_data={"secret": "s3cret"},
-        )
-
-        assert needs_update is expected_needs_update
-        container.push.assert_not_called()
-
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,
         application_context,

@@ -165,7 +165,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 3
+LIBPATCH = 4
 
 # TODO: add your code here! Happy coding!
 
@@ -205,7 +205,7 @@ def write_airflow_config(
             group="root",
             make_dirs=True,
         )
-        logger.info("Successfully wrote Airflow config to %s", config_path)
+        logger.info(f"Successfully wrote Airflow config to {config_path}")
     except Exception as e:
         raise RuntimeError(f"Failed to write Airflow config: {e}") from e
 
@@ -936,43 +936,31 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             ]
         )
 
-    def _get_rendered_config(self) -> str:
-        """Render the Airflow config template, caching the result for this event lifecycle."""
-        if self._rendered_config_cache is None:
-            provider_content = self._requirer_handler.provider_content
-            self._rendered_config_cache = (
-                jinja2.Environment()
-                .from_string(provider_content.config_template)
-                .render(**json.loads(provider_content.sensitive_data))
-            )
-        return self._rendered_config_cache
-
-    def _get_on_disk_config(self, config_path: str) -> str | None:
-        """Read the on-disk config file content, caching the result for this event lifecycle."""
-        if config_path not in self._on_disk_config_cache:
-            if self._workload_container.exists(config_path):
-                self._on_disk_config_cache[config_path] = (
-                    self._workload_container.pull(config_path).read()
-                )
-            else:
-                self._on_disk_config_cache[config_path] = None
-        return self._on_disk_config_cache[config_path]
-
     def airflow_config_needs_update(self, config_path: str) -> bool:
         """Check whether the rendered Airflow config differs from the file currently on disk."""
-        return self._get_on_disk_config(config_path) != self._get_rendered_config()
+        provider_content = self._requirer_handler.provider_content
+        rendered_config = (
+            jinja2.Environment()
+            .from_string(provider_content.config_template)
+            .render(**json.loads(provider_content.sensitive_data))
+        )
+
+        if self._workload_container.exists(config_path):
+            on_disk_config = self._workload_container.pull(config_path).read()
+        else:
+            on_disk_config = None
+
+        return on_disk_config != rendered_config
 
     def write_airflow_config(self, config_path: str) -> None:
         """Render and write the Airflow config in the provided path in the workload container."""
-        rendered = self._get_rendered_config()
-        self._workload_container.push(
-            config_path,
-            rendered,
-            user="root",
-            group="root",
-            make_dirs=True,
+        provider_content = self._requirer_handler.provider_content
+        write_airflow_config(
+            container=self._workload_container,
+            config_path=config_path,
+            config_template=provider_content.config_template,
+            sensitive_data=json.loads(provider_content.sensitive_data),
         )
-        logger.info("Successfully wrote Airflow config to %s", config_path)
 
     @property
     def can_write_kubernetes_executor_pod_spec(self) -> bool:
