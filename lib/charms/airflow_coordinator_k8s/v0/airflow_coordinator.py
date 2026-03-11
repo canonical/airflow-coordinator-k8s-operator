@@ -939,10 +939,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
     def airflow_config_needs_update(self, config_path: str) -> bool:
         """Check whether the rendered Airflow config differs from the file currently on disk."""
         provider_content = self._requirer_handler.provider_content
-        rendered_config = (
-            jinja2.Environment()
-            .from_string(provider_content.config_template)
-            .render(**json.loads(provider_content.sensitive_data))
+        rendered_config = jinja2.Template(provider_content.config_template).render(
+            **json.loads(provider_content.sensitive_data)
         )
 
         if self._workload_container.exists(config_path):
