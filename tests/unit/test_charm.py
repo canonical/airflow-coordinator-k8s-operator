@@ -361,12 +361,17 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
         assert "config-template" not in relation.local_app_data
 
 
-def test_secret_key_generated_and_persisted(context, state, mock_command_executor, workload_container):
+def test_secret_key_generated_and_persisted(
+    context, state, mock_command_executor, workload_container
+):
     """Verify secret_key is generated and stored in peer relation data."""
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }} {{ secret_key }} {{ jwt_secret }}"
+            return_value="mock_config: "
+            "{{ sql_alchemy_connection_string }} "
+            "{{ secret_key }} "
+            "{{ jwt_secret }}"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -377,12 +382,17 @@ def test_secret_key_generated_and_persisted(context, state, mock_command_executo
     assert len(secret_key) == 64  # token_hex(32) produces 64 hex chars
 
 
-def test_jwt_secret_generated_and_persisted(context, state, mock_command_executor, workload_container):
+def test_jwt_secret_generated_and_persisted(
+    context, state, mock_command_executor, workload_container
+):
     """Verify jwt_secret is generated and stored in peer relation data."""
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }} {{ secret_key }} {{ jwt_secret }}"
+            return_value="mock_config: "
+            "{{ sql_alchemy_connection_string }} "
+            "{{ secret_key }} "
+            "{{ jwt_secret }}"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -400,7 +410,10 @@ def test_secrets_reused_across_events(
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }} {{ secret_key }} {{ jwt_secret }}"
+            return_value="mock_config: "
+            "{{ sql_alchemy_connection_string }} "
+            "{{ secret_key }} "
+            "{{ jwt_secret }}"
         ),
     ):
         state_out = context.run(
@@ -425,15 +438,16 @@ def test_secrets_reused_across_events(
             "db_migration_ran": "true",
         },
     )
-    relations = [
-        r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME
-    ]
+    relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(peer_with_secrets)
 
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }} {{ secret_key }} {{ jwt_secret }}"
+            return_value="mock_config: "
+            "{{ sql_alchemy_connection_string }} "
+            "{{ secret_key }} "
+            "{{ jwt_secret }}"
         ),
     ):
         state_out_2 = context.run(
