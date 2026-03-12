@@ -144,10 +144,18 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
         f"base_url = http://airflow-api-server-mock-endpoints.{juju.model}.svc.cluster.local:8080"
         in next(iter(airflow_configs))
     )
-    assert (
-        "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
-    )
+
+    sensitive = json.loads(all_sensitive_data[0])
+    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "secret_key" in sensitive
+    assert "jwt_secret" in sensitive
+    assert len(sensitive["secret_key"]) == 64
+    assert len(sensitive["jwt_secret"]) == 64
+
+    # Verify secret_key and jwt_secret are rendered in the config file
+    config = next(iter(airflow_configs))
+    assert f"secret_key = {sensitive['secret_key']}" in config
+    assert f"jwt_secret = {sensitive['jwt_secret']}" in config
 
 
 def test_remove_and_recreate_integrations(juju: jubilant.Juju):
@@ -221,10 +229,12 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
     assert len(airflow_configs) == 1
     assert len(all_sensitive_data) == 1
 
-    assert (
-        "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
-    )
+    sensitive = json.loads(all_sensitive_data[0])
+    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "secret_key" in sensitive
+    assert "jwt_secret" in sensitive
+    assert len(sensitive["secret_key"]) == 64
+    assert len(sensitive["jwt_secret"]) == 64
 
 
 def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
@@ -300,10 +310,12 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
     assert len(airflow_configs) == 1
     assert len(all_sensitive_data) == 1
 
-    assert (
-        "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
-    )
+    sensitive = json.loads(all_sensitive_data[0])
+    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "secret_key" in sensitive
+    assert "jwt_secret" in sensitive
+    assert len(sensitive["secret_key"]) == 64
+    assert len(sensitive["jwt_secret"]) == 64
 
 
 def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
@@ -356,7 +368,9 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     assert len(airflow_configs) == 1
     assert len(all_sensitive_data) == 1
 
-    assert (
-        "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
-    )
+    sensitive = json.loads(all_sensitive_data[0])
+    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "secret_key" in sensitive
+    assert "jwt_secret" in sensitive
+    assert len(sensitive["secret_key"]) == 64
+    assert len(sensitive["jwt_secret"]) == 64
