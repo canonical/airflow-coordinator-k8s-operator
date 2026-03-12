@@ -165,7 +165,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 3
+LIBPATCH = 4
 
 # TODO: add your code here! Happy coding!
 
@@ -936,15 +936,28 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             ]
         )
 
-    def write_airflow_config(self, config_path: str) -> None:
-        """Render the Airflow config in the provided path in the workload container."""
+    def airflow_config_needs_update(self, config_path: str) -> bool:
+        """Check whether the rendered Airflow config differs from the file currently on disk."""
         provider_content = self._requirer_handler.provider_content
+        rendered_config = jinja2.Template(provider_content.config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
 
+        if self._workload_container.exists(config_path):
+            on_disk_config = self._workload_container.pull(config_path).read()
+        else:
+            on_disk_config = None
+
+        return on_disk_config != rendered_config
+
+    def write_airflow_config(self, config_path: str) -> None:
+        """Render and write the Airflow config in the provided path in the workload container."""
+        provider_content = self._requirer_handler.provider_content
         write_airflow_config(
-            self._workload_container,
-            config_path,
-            provider_content.config_template,
-            json.loads(provider_content.sensitive_data),
+            container=self._workload_container,
+            config_path=config_path,
+            config_template=provider_content.config_template,
+            sensitive_data=json.loads(provider_content.sensitive_data),
         )
 
     @property
