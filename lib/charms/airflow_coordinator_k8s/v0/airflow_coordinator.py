@@ -123,6 +123,9 @@ LIBAPI = 0
 # to 0 if you are raising the major API version
 LIBPATCH = 1
 
+WORKLOAD_USER = "ubuntu"
+WORKLOAD_GROUP = "ubuntu"
+
 # TODO: add your code here! Happy coding!
 
 logger = logging.getLogger(__name__)
@@ -157,8 +160,8 @@ def write_airflow_config(
         container.push(
             config_path,
             config,
-            user="ubuntu",
-            group="ubuntu",
+            user=WORKLOAD_USER,
+            group=WORKLOAD_GROUP,
             make_dirs=True,
         )
         logger.info(f"Successfully wrote Airflow config to {config_path}")
@@ -857,8 +860,8 @@ class AirflowCoordinatorRequires(ops.Object):
         self._workload_container.push(
             filepath,
             k8s_executor_pod_spec,
-            user="ubuntu",
-            group="ubuntu",
+            user=WORKLOAD_USER,
+            group=WORKLOAD_GROUP,
             make_dirs=True,
         )
 
