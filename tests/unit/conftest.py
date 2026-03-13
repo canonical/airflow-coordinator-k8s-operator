@@ -152,32 +152,20 @@ def all_required_relations(
 
 @pytest.fixture
 def mock_run_db_migrate():
-    """Mock the charm's _run_db_migrate and _setup_workload_permissions methods."""
-    with (
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_run_db_migrate",
-        ) as mock,
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_setup_workload_permissions",
-        ),
-    ):
+    """Mock the charm's _run_db_migrate method."""
+    with unittest.mock.patch.object(
+        AirflowCoordinatorK8SOperatorCharm,
+        "_run_db_migrate",
+    ) as mock:
         yield mock
 
 
 @pytest.fixture(scope="function")
 def mock_command_executor():
-    """Mock the command executor and _setup_workload_permissions to avoid container operations."""
-    with (
-        unittest.mock.patch.object(
-            command_executor.CommandExecutor, "run_db_migrate"
-        ) as mock_run_db_migrate,
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_setup_workload_permissions",
-        ),
-    ):
+    """Mock the command executor to avoid actual container operations."""
+    with unittest.mock.patch.object(
+        command_executor.CommandExecutor, "run_db_migrate"
+    ) as mock_run_db_migrate:
         mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
             success=True, stdout="", stderr="", return_code=0
         )

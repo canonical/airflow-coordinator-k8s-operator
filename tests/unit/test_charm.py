@@ -13,7 +13,6 @@ import ops.testing
 
 import command_executor
 import constants
-from charm import AirflowCoordinatorK8SOperatorCharm
 
 
 def test_non_leader_unit(context, state, mock_command_executor):
@@ -351,86 +350,6 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):
         assert "config-template" not in relation.local_app_data
-
-
-def test__setup_workload_permissions_called_before_db_migrate(
-    context,
-    all_required_relations,
-    workload_container,
-    peer_relation,
-):
-    """Verify _setup_workload_permissions is called when db migration runs."""
-    with (
-        unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
-            ),
-        ),
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_run_db_migrate",
-        ),
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_setup_workload_permissions",
-        ) as mock_ensure_dirs,
-    ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=all_required_relations,
-        )
-
-        context.run(
-            context.on.pebble_ready(workload_container),
-            state_in,
-        )
-
-    mock_ensure_dirs.assert_called_once()
-
-
-def test__setup_workload_permissions_not_called_when_migration_already_ran(
-    context,
-    all_required_relations,
-    workload_container,
-    peer_relation,
-):
-    """Verify _setup_workload_permissions is NOT called when migration already ran."""
-    peer_relation_with_state = dataclasses.replace(
-        peer_relation, local_app_data={"db_migration_ran": "true"}
-    )
-    relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
-    relations.append(peer_relation_with_state)
-
-    with (
-        unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
-            ),
-        ),
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_run_db_migrate",
-        ),
-        unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm,
-            "_setup_workload_permissions",
-        ) as mock_ensure_dirs,
-    ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=relations,
-        )
-
-        context.run(
-            context.on.pebble_ready(workload_container),
-            state_in,
-        )
-
-    mock_ensure_dirs.assert_not_called()
 
 
 class TestPebbleLayer:
