@@ -14,6 +14,9 @@ AIRFLOW_DATABASE_NAME = "airflow"
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
 AIRFLOW_CONFIG_PATH = "/opt/airflow/airflow.cfg"
 
+WORKLOAD_USER = "ubuntu"
+WORKLOAD_GROUP = "ubuntu"
+
 MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
 WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
 WAITING_FOR_DATABASE_CONNECTION_MESSAGE = "Waiting for database connection info from postgres"

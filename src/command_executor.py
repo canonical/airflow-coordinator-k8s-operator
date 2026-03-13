@@ -8,6 +8,8 @@ import typing
 
 import ops
 
+import constants
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,8 +63,8 @@ class CommandExecutor:
                 environment={
                     "AIRFLOW_HOME": "/opt/airflow",
                 },
-                user="ubuntu",
-                group="ubuntu",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
             )
             stdout, stderr = process.wait_output()
 
