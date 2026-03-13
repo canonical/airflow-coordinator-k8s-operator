@@ -11,9 +11,50 @@ retrieval of fields in pydantic models in the databag if plaintext, and in a
 juju secret if sensitive. We expand upon the implementation approach established
 in data_interfaces v1.
 
-### Requirer Charm
+### Requirer Charms
 
-The following presents an example usage of the AirflowCoordinatorRequires class:
+Two requirer classes are provided depending on the nature of the charm.
+
+**`AirflowCoordinatorRequires`** is the base class for charms that consume the
+coordinator relation but do not run an Airflow workload in a sidecar container
+(e.g. the coordinator charm itself running DB migrations). It writes the rendered
+Airflow config directly to the local filesystem via `pathlib`.
+
+```python
+import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
+
+class AirflowRequirerCharm(ops.CharmBase):
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+
+        self.requirer = airflow_coordinator.AirflowCoordinatorRequires(
+            self,
+            "airflow-coordinator", # relation endpoint
+            callback=self.reconcile,
+        )
+
+    def reconcile(self, event) -> None:
+        # Determine current state of charm, what it should be, and how to get there
+```
+
+`AirflowCoordinatorRequires` surfaces the following:
+1. `provider_content`: the raw data shared by the coordinator charm
+2. `can_write_airflow_config`: True when the coordinator has shared a config
+template and sensitive data
+3. `write_airflow_config(filepath)`: renders and writes the Airflow config to
+a local filesystem path
+
+`AirflowCoordinatorRequires` will invoke the provided `callback` when:
+- the coordinator charm first shares the airflow config
+- the coordinator charm updates anything that affects the airflow config
+- the relation with the coordinator charm is broken or joined
+
+---
+
+**`AirflowCoordinatorCoreRequires`** extends `AirflowCoordinatorRequires` for
+Airflow core charms (Scheduler, API Server, Triggerer, DAG Processor). It adds
+pebble workload container awareness, metadata registration, and validation
+failure handling.
 
 ```python
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -22,7 +63,7 @@ class AirflowCoreCharm(ops.CharmBase):
     def __init__(self, *args) -> None:
         super().__init__(*args)
 
-        self.requirer = airflow_coordinator.AirflowCoordinatorRequires(
+        self.requirer = airflow_coordinator.AirflowCoordinatorCoreRequires(
             self,
             "airflow-coordinator", # relation endpoint
             component="scheduler", # the component this charm represents
@@ -34,21 +75,23 @@ class AirflowCoreCharm(ops.CharmBase):
         # Determine current state of charm, what it should be, and how to get there
 ```
 
-The AirflowCoordinatorRequires surfaces the following:
-1. `ready`: indicates whether the relation is ready and config available in databag
-2. `airflow_core_validation_failures`: all Airflow Core charm validation failures in the cluster.
-3. `validation_failure_messages`: all validation failures for this charm
+`AirflowCoordinatorCoreRequires` surfaces everything from
+`AirflowCoordinatorRequires`, plus:
+1. `_ready`: indicates whether the relation is ready and config available in databag
+2. `airflow_core_validation_failures`: all Airflow Core charm validation failures
+in the cluster
+3. `validation_failure_messages`: all validation failures specific to this charm
 4. `missing_core_components_exist`: if any core charms are missing in the cluster
-5. `can_write_airflow_config`: all prerequisites met to be able to render and
-write airflow config file
-6. `write_airflow_config(filepath)`: renders and writes the airflow config in
-the workload container
+5. `can_write_airflow_config`: extends the base check to also require pebble
+connectivity and the absence of validation errors
+6. `write_airflow_config(filepath)`: renders and writes the Airflow config into
+the pebble workload container
 7. `can_write_kubernetes_executor_pod_spec`: all prerequisites met to be able
 to render and write the k8s executor pod spec
-8. `write_kubernetes_pod_spec(filepath)`: renders and write the k8s executor
-pod spec in the workload container
+8. `write_kubernetes_executor_pod_spec(filepath)`: renders and writes the k8s
+executor pod spec into the pebble workload container
 
-The AirflowCoordinatorRequires will invoke the provided `callback` when:
+`AirflowCoordinatorCoreRequires` will invoke the provided `callback` when:
 - the coordinator charm shares validation failures for all related core charms
 - the coordinator charm first shares the airflow config and/or k8s executor
 pod spec files
@@ -67,7 +110,7 @@ class AirflowCoordinatorCharm(ops.CharmBase):
     def __init__(self, *args) -> None:
         super().__init__(*args)
 
-        self.requirer = airflow_coordinator.AirflowCoordinatorProvides(
+        self.provider = airflow_coordinator.AirflowCoordinatorProvides(
             self,
             "airflow-coordinator", # relation endpoint
             callback=self.reconcile,
@@ -86,11 +129,11 @@ amongst the related core charms
 count amongst the related core charms
 4. `are_airflow_versions_consistent`: whether airflow versions consistent amongst
 all required related core charms
-4. `are_workload_image_hashes_consistent`: whether workload image hashes are
+5. `are_workload_image_hashes_consistent`: whether workload image hashes are
 consistent amongst all required related core charms
-5. `set_validation_errors()`: set any validation errors in databags of all
+6. `set_validation_errors()`: set any validation errors in databags of all
 related core charms
-6. `set_airflow_config()`: set the airflow config, k8s executor pod spec if
+7. `set_airflow_config()`: set the airflow config, k8s executor pod spec if
 available, and sensitive data in databag + juju secret to share with all related
 core charms
 
@@ -104,6 +147,7 @@ import collections
 import enum
 import json
 import logging
+import pathlib
 import pickle
 import typing
 
@@ -121,7 +165,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 4
 
 WORKLOAD_USER = "ubuntu"
 WORKLOAD_GROUP = "ubuntu"
@@ -155,7 +199,7 @@ def write_airflow_config(
         raise RuntimeError("Cannot connect to workload container")
 
     try:
-        config = jinja2.Environment().from_string(config_template).render(**sensitive_data)
+        config = jinja2.Template(config_template).render(**sensitive_data)
 
         container.push(
             config_path,
@@ -400,7 +444,7 @@ class AirflowCoordinatorRequirerEventHandler(
         if (
             "config-template" in _diff.changed
             or "kubernetes-executor-pod-spec" in _diff.changed
-            or "sensitive_data" in _diff.changed
+            or "sensitive-data" in _diff.changed
         ):
             getattr(self.on, "airflow_config_updated").emit(
                 event.relation, app=event.app, unit=event.unit, content=content
@@ -613,7 +657,7 @@ class AirflowCoordinatorProviderEventHandler(
         if not self.interface.relations:
             return
 
-        if not all([config_template, sensitive_data]):
+        if not config_template:
             return
 
         if not self.charm.unit.is_leader():
@@ -717,16 +761,14 @@ class AirflowCoordinatorRequires(ops.Object):
         self,
         charm: ops.CharmBase,
         relation_name: str,
-        component: str,
-        workload_container: ops.Container,
         callback: typing.Callable,
     ):
         self._charm = charm
         self._relation_name = relation_name
-        self._component = component
 
         if not charm.model.get_relation(relation_name):
-            self._charm.framework.observe(charm.on[relation_name].relation_broken, callback)
+            for event in self._no_relation_events():
+                self._charm.framework.observe(event, callback)
 
             return
 
@@ -736,8 +778,83 @@ class AirflowCoordinatorRequires(ops.Object):
             charm, relation_name, AirflowCoordinatorProviderModel
         )
 
-        self._workload_container = workload_container
+        self._on_handler_ready()
 
+        for event in self._relation_events():
+            self.framework.observe(event, callback)
+
+    def _no_relation_events(self) -> list:
+        """Events to observe when no relation exists."""
+        return [
+            self._charm.on[self._relation_name].relation_joined,
+            self._charm.on[self._relation_name].relation_broken,
+        ]
+
+    def _on_handler_ready(self) -> None:
+        """Called after the requirer handler is created. Override for extra setup."""
+        pass
+
+    def _relation_events(self) -> list:
+        """Events to observe when a relation exists."""
+        return [
+            self._requirer_handler.on.airflow_config_available,
+            self._requirer_handler.on.airflow_config_updated,
+            self._charm.on[self._relation_name].relation_joined,
+            self._charm.on[self._relation_name].relation_broken,
+        ]
+
+    @property
+    def provider_content(self) -> typing.Optional[AirflowCoordinatorProviderModel]:
+        """Data from the related Airflow Coordinator charm."""
+        return self._requirer_handler.provider_content
+
+    @property
+    def can_write_airflow_config(self) -> bool:
+        """Return True if it is safe to write the Airflow config to the container.
+
+        This check ensures the coordinator has shared relevant config data
+        in the relation and that the relation exists.
+        """
+        content = self.provider_content
+        return bool(content and content.config_template and content.sensitive_data)
+
+    def write_airflow_config(self, config_path: str) -> None:
+        """Render the Airflow config and write it to a local filesystem path.
+
+        Writes to a plain filesystem path rather than a pebble workload container,
+        making it suitable for charms without a sidecar container.
+
+        Args:
+            config_path: the path where the configuration file will be saved.
+        """
+        provider_content = self.provider_content
+        config = jinja2.Template(provider_content.config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
+        path = pathlib.Path(config_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(config)
+
+
+class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
+    """A requirer handler for Airflow core charms."""
+
+    def __init__(
+        self,
+        charm: ops.CharmBase,
+        relation_name: str,
+        component: str,
+        workload_container: ops.Container,
+        callback: typing.Callable,
+    ):
+        self._component = component
+        self._workload_container = workload_container
+        super().__init__(charm, relation_name, callback)
+
+    def _no_relation_events(self) -> list:
+        return [self._charm.on[self._relation_name].relation_broken]
+
+    def _on_handler_ready(self) -> None:
         if self._workload_container.can_connect():
             # TODO: pull airflow_version and workload_image_hash from container
             # after https://github.com/canonical/airflow-rocks/issues/13 is resolved
@@ -748,17 +865,17 @@ class AirflowCoordinatorRequires(ops.Object):
                 metadata=AirflowCoordinatorRequirerModel(
                     airflow_version=airflow_version,
                     workload_image_hash=workload_image_hash,
-                    component=component,
+                    component=self._component,
                 )
             )
 
-        for event in [
+    def _relation_events(self) -> list:
+        return [
             self._requirer_handler.on.airflow_config_available,
             self._requirer_handler.on.airflow_config_updated,
             self._requirer_handler.on.airflow_core_metadata_validation_failed,
-            charm.on[relation_name].relation_broken,
-        ]:
-            self.framework.observe(event, callback)
+            self._charm.on[self._relation_name].relation_broken,
+        ]
 
     @property
     def _ready(self) -> bool:
@@ -822,15 +939,28 @@ class AirflowCoordinatorRequires(ops.Object):
             ]
         )
 
-    def write_airflow_config(self, config_path: str) -> None:
-        """Render the Airflow config in the provided path in the workload container."""
+    def airflow_config_needs_update(self, config_path: str) -> bool:
+        """Check whether the rendered Airflow config differs from the file currently on disk."""
         provider_content = self._requirer_handler.provider_content
+        rendered_config = jinja2.Template(provider_content.config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
 
+        if self._workload_container.exists(config_path):
+            on_disk_config = self._workload_container.pull(config_path).read()
+        else:
+            on_disk_config = None
+
+        return on_disk_config != rendered_config
+
+    def write_airflow_config(self, config_path: str) -> None:
+        """Render and write the Airflow config in the provided path in the workload container."""
+        provider_content = self._requirer_handler.provider_content
         write_airflow_config(
-            self._workload_container,
-            config_path,
-            provider_content.config_template,
-            json.loads(provider_content.sensitive_data),
+            container=self._workload_container,
+            config_path=config_path,
+            config_template=provider_content.config_template,
+            sensitive_data=json.loads(provider_content.sensitive_data),
         )
 
     @property
@@ -851,11 +981,9 @@ class AirflowCoordinatorRequires(ops.Object):
         """Render the K8s executor pod spec in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
 
-        k8s_executor_pod_spec = (
-            jinja2.Environment()
-            .from_string(provider_content.kubernetes_executor_pod_spec)
-            .render(**json.loads(provider_content.sensitive_data))
-        )
+        k8s_executor_pod_spec = jinja2.Template(
+            provider_content.kubernetes_executor_pod_spec
+        ).render(**json.loads(provider_content.sensitive_data))
 
         self._workload_container.push(
             filepath,
@@ -1004,17 +1132,17 @@ class AirflowCoordinatorProvides(ops.Object):
 
     def set_airflow_config(
         self,
-        config_template: str,
+        config_template: typing.Optional[str] = None,
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
     ) -> None:
         """Update config with related core charms.
 
         Args:
-            config_template: Airflow config (jinja template string)
-            k8s_executor_pod_spec_template: (optional) K8s executor pod spec template
+            config_template: Airflow config as a Jinja2 template string.
+            k8s_executor_pod_spec_template: (optional) K8s executor pod spec template.
             sensitive_data: sensitive data to render config of k8s executor pod
-                spec jinja templates with
+                spec jinja templates with.
         """
         self._provider_handler.update_content(
             config_template=config_template,

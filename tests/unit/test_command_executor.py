@@ -42,8 +42,6 @@ class TestCommandExecutor:
             ["airflow", "db", "migrate"],
             environment={
                 "AIRFLOW_HOME": "/opt/airflow",
-                "AIRFLOW_CONFIG": "/airflow.cfg",
-                "AIRFLOW__CORE__DAGS_FOLDER": "/opt/airflow/dags",
             },
             user="ubuntu",
             group="ubuntu",

@@ -11,6 +11,7 @@ output "provides" {
 
 output "requires" {
   value = {
-    postgres = "postgres"
+    postgres           = "postgres"
+    airflow_api_server = "airflow-api-server"
   }
 }

@@ -19,7 +19,7 @@ format: (clean-mock-charm-libs)
 	uv tool run tox -e format
 
 # Run integration tests
-integration debug="": (clean-mock-charm-libs)
+integration debug="": (clean)
 	#!/usr/bin/bash
 	charmcraft pack
 
@@ -39,7 +39,7 @@ unit:
 
 # Clean up test environment
 clean: (clean-mock-charm-libs)
-	juju destroy-model --force --destroy-storage --no-prompt test
+	juju destroy-model --force --destroy-storage --no-prompt test || true
 
 # Get system state for debugging
 get-system-state:
