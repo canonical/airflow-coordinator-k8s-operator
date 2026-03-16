@@ -618,6 +618,58 @@ class TestAirflowCoordinatorCoreRequires:
             assert config_file_path.read_text(encoding="utf-8") == "test-config: s3cret"
             assert config_file_path.stat().st_mode & 0o777 == 0o644
 
+    def test_airflow_config_needs_update_returns_true_when_config_absent(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return True when the config file does not yet exist on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            assert manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+    def test_airflow_config_needs_update_returns_false_when_config_unchanged(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return False when the rendered config matches the file already on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            manager.charm.requirer.write_airflow_config("/config/path")
+            assert not manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+    def test_airflow_config_needs_update_returns_true_when_config_changed(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        """Return True when the rendered config differs from the file already on disk."""
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            manager.run()
+
+            manager.charm.unit.get_container("workload-container").push(
+                "/config/path",
+                "test-config: old-value",
+                make_dirs=True,
+            )
+
+            assert manager.charm.requirer.airflow_config_needs_update("/config/path")
+
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
         self,
         application_context,
