@@ -11,9 +11,9 @@ import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import ops
+from cryptography.fernet import Fernet
 from ops.pebble import LayerDict
 
-from cryptography.fernet import Fernet
 import command_executor
 import config_generator
 import constants
@@ -171,7 +171,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """
         key = self._peer_relation.data[self.app].get("fernet_key")
         if not key:
-
             key = Fernet.generate_key().decode()
             self._peer_relation.data[self.app]["fernet_key"] = key
         return key
