@@ -289,7 +289,8 @@ def test_db_migration_does_not_run_on_state_true(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_in = ops.testing.State(
@@ -321,7 +322,8 @@ def test_db_migration_runs_on_state_false(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_in = ops.testing.State(
@@ -349,7 +351,8 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -371,7 +374,8 @@ def test_secret_key_generated_and_persisted(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -392,7 +396,8 @@ def test_jwt_secret_generated_and_persisted(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -403,17 +408,45 @@ def test_jwt_secret_generated_and_persisted(
     assert len(jwt_secret) == 64  # token_hex(32) produces 64 hex chars
 
 
-def test_secrets_reused_across_events(
-    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+def test_fernet_key_generated_and_persisted(
+    context, state, mock_command_executor, workload_container
 ):
-    """Verify secret_key and jwt_secret are not regenerated on subsequent events."""
+    """Verify fernet_key is generated and stored in peer relation data.
+
+    The fernet_key is a URL-safe base64-encoded 32-byte key used by Airflow
+    to encrypt sensitive data (e.g. connection passwords) in the metadata DB.
+    """
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
+        ),
+    ):
+        state_out = context.run(context.on.pebble_ready(workload_container), state)
+
+    peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
+    fernet_key = peer.local_app_data.get("fernet_key")
+    assert fernet_key is not None
+    # base64.urlsafe_b64encode(os.urandom(32)) produces a 44-char base64 string
+    assert len(fernet_key) == 44
+
+
+def test_secrets_reused_across_events(
+    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+):
+    """Verify secret_key, jwt_secret, and fernet_key are not regenerated on subsequent events."""
+    with unittest.mock.patch(
+        "config_generator.AirflowConfigGenerator.config_template",
+        new_callable=unittest.mock.PropertyMock(
+            return_value="mock_config: "
+            "{{ sql_alchemy_connection_string }} "
+            "{{ secret_key }} "
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_out = context.run(
@@ -428,6 +461,7 @@ def test_secrets_reused_across_events(
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
     first_secret_key = peer.local_app_data["secret_key"]
     first_jwt_secret = peer.local_app_data["jwt_secret"]
+    first_fernet_key = peer.local_app_data["fernet_key"]
 
     # Run again with the peer relation already populated
     peer_with_secrets = dataclasses.replace(
@@ -435,6 +469,7 @@ def test_secrets_reused_across_events(
         local_app_data={
             "secret_key": first_secret_key,
             "jwt_secret": first_jwt_secret,
+            "fernet_key": first_fernet_key,
             "db_migration_ran": "true",
         },
     )
@@ -447,7 +482,8 @@ def test_secrets_reused_across_events(
             return_value="mock_config: "
             "{{ sql_alchemy_connection_string }} "
             "{{ secret_key }} "
-            "{{ jwt_secret }}"
+            "{{ jwt_secret }} "
+            "{{ fernet_key }}"
         ),
     ):
         state_out_2 = context.run(
@@ -462,6 +498,7 @@ def test_secrets_reused_across_events(
     peer_2 = state_out_2.get_relations(constants.PEER_RELATION_NAME)[0]
     assert peer_2.local_app_data["secret_key"] == first_secret_key
     assert peer_2.local_app_data["jwt_secret"] == first_jwt_secret
+    assert peer_2.local_app_data["fernet_key"] == first_fernet_key
 
 
 class TestPebbleLayer:

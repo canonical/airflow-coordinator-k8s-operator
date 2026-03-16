@@ -149,13 +149,17 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
     assert "secret_key" in sensitive
     assert "jwt_secret" in sensitive
+    assert "fernet_key" in sensitive
     assert len(sensitive["secret_key"]) == 64
     assert len(sensitive["jwt_secret"]) == 64
+    # Fernet key is base64-encoded 32 bytes = 44 chars
+    assert len(sensitive["fernet_key"]) == 44
 
     # Verify secret_key and jwt_secret are rendered in the config file
     config = next(iter(airflow_configs))
     assert f"secret_key = {sensitive['secret_key']}" in config
     assert f"jwt_secret = {sensitive['jwt_secret']}" in config
+    assert f"fernet_key = {sensitive['fernet_key']}" in config
 
 
 def test_remove_and_recreate_integrations(juju: jubilant.Juju):
@@ -233,8 +237,10 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
     assert "secret_key" in sensitive
     assert "jwt_secret" in sensitive
+    assert "fernet_key" in sensitive
     assert len(sensitive["secret_key"]) == 64
     assert len(sensitive["jwt_secret"]) == 64
+    assert len(sensitive["fernet_key"]) == 44
 
 
 def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
@@ -314,8 +320,10 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
     assert "secret_key" in sensitive
     assert "jwt_secret" in sensitive
+    assert "fernet_key" in sensitive
     assert len(sensitive["secret_key"]) == 64
     assert len(sensitive["jwt_secret"]) == 64
+    assert len(sensitive["fernet_key"]) == 44
 
 
 def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
@@ -372,5 +380,7 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
     assert "secret_key" in sensitive
     assert "jwt_secret" in sensitive
+    assert "fernet_key" in sensitive
     assert len(sensitive["secret_key"]) == 64
     assert len(sensitive["jwt_secret"]) == 64
+    assert len(sensitive["fernet_key"]) == 44

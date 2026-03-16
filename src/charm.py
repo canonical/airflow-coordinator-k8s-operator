@@ -13,6 +13,7 @@ import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import ops
 from ops.pebble import LayerDict
 
+from cryptography.fernet import Fernet
 import command_executor
 import config_generator
 import constants
@@ -158,6 +159,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             secret = secrets.token_hex(32)
             self._peer_relation.data[self.app]["jwt_secret"] = secret
         return secret
+
+    @property
+    def _fernet_key(self) -> str:
+        """Get or generate the Fernet key for encrypting sensitive data in the metadata DB.
+
+        Must be identical across all units to ensure any unit can decrypt
+        connection passwords and other sensitive fields stored in the database.
+        Generated as a URL-safe base64-encoded 32-byte key, which is the
+        format required by the cryptography.fernet.Fernet class.
+        """
+        key = self._peer_relation.data[self.app].get("fernet_key")
+        if not key:
+
+            key = Fernet.generate_key().decode()
+            self._peer_relation.data[self.app]["fernet_key"] = key
+        return key
 
     @property
     def _db_migration_ran(self) -> bool:

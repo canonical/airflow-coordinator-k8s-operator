@@ -60,4 +60,5 @@ class AirflowConfigGenerator:
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
             "secret_key": self._charm._secret_key,
             "jwt_secret": self._charm._jwt_secret,
+            "fernet_key": self._charm._fernet_key,
         }
