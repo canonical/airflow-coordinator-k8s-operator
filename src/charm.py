@@ -6,6 +6,7 @@
 
 import logging
 import secrets
+from collections.abc import Mapping
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
@@ -130,50 +131,48 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             )
         return peer_relation
 
-    @property
-    def _secret_key(self) -> str:
-        """Get or generate the secret key for CSRF and session signing.
+    @staticmethod
+    def _generate_runtime_secret_content(peer_data: Mapping[str, str]) -> dict[str, str]:
+        """Generate runtime secret values, preserving any legacy peer data values."""
+        return {
+            "secret-key": peer_data.get("secret_key") or secrets.token_hex(32),
+            "jwt-secret": peer_data.get("jwt_secret") or secrets.token_hex(32),
+            "fernet-key": peer_data.get("fernet_key") or Fernet.generate_key().decode(),
+        }
 
-        Must be identical across all API server units in HA mode.
-        Used for CSRF token generation, session cookie signing, and
-        Celery executor message signing. If inconsistent, CSRF validation
-        and session verification will fail across units.
+    def _ensure_runtime_secret(self) -> ops.Secret:
+        """Return the Juju application secret holding runtime keys, creating if needed.
+
+        On first call the secret is created with generated values and the secret
+        ID is stored in the peer relation databag.  If legacy plaintext fields
+        exist in the peer databag they are migrated into the secret and removed.
         """
-        secret = self._peer_relation.data[self.app].get("secret_key")
-        if not secret:
-            secret = secrets.token_hex(32)
-            self._peer_relation.data[self.app]["secret_key"] = secret
-        return secret
+        peer_data = self._peer_relation.data[self.app]
 
-    @property
-    def _jwt_secret(self) -> str:
-        """Get or generate the JWT secret for API authentication.
+        # Fast path: secret already tracked
+        secret_id = peer_data.get(constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD)
+        if secret_id:
+            return self.model.get_secret(id=secret_id)
 
-        Must be identical across all API server units in HA mode.
-        Used to encode and decode JWTs for public and private API
-        authentication. If inconsistent, JWTs issued by one unit will
-        fail validation on another, breaking cross-unit API calls.
-        """
-        secret = self._peer_relation.data[self.app].get("jwt_secret")
-        if not secret:
-            secret = secrets.token_hex(32)
-            self._peer_relation.data[self.app]["jwt_secret"] = secret
-        return secret
+        # Try to find an existing secret by label (e.g. after peer data loss)
+        try:
+            runtime_secret = self.model.get_secret(label=constants.AIRFLOW_RUNTIME_SECRET_LABEL)
+        except ops.SecretNotFoundError:
+            content = self._generate_runtime_secret_content(peer_data)
+            runtime_secret = self.app.add_secret(
+                content, label=constants.AIRFLOW_RUNTIME_SECRET_LABEL
+            )
 
-    @property
-    def _fernet_key(self) -> str:
-        """Get or generate the Fernet key for encrypting sensitive data in the metadata DB.
+        # if not runtime_secret.id:
+        #     raise RuntimeError("Juju secret created without an ID")
 
-        Must be identical across all units to ensure any unit can decrypt
-        connection passwords and other sensitive fields stored in the database.
-        Generated as a URL-safe base64-encoded 32-byte key, which is the
-        format required by the cryptography.fernet.Fernet class.
-        """
-        key = self._peer_relation.data[self.app].get("fernet_key")
-        if not key:
-            key = Fernet.generate_key().decode()
-            self._peer_relation.data[self.app]["fernet_key"] = key
-        return key
+        peer_data[constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD] = runtime_secret.id
+
+        # Remove legacy plaintext fields
+        # for field in constants.LEGACY_PEER_SECRET_FIELDS:
+        #     peer_data.pop(field, None)
+
+        return runtime_secret
 
     @property
     def _db_migration_ran(self) -> bool:

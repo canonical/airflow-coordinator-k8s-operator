@@ -25,3 +25,7 @@ WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE = "Waiting for host+port information fr
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
+
+AIRFLOW_RUNTIME_SECRET_ID_FIELD = "airflow_runtime_secret_id"
+AIRFLOW_RUNTIME_SECRET_LABEL = "airflow-runtime-secrets"
+LEGACY_PEER_SECRET_FIELDS = ("secret_key", "jwt_secret", "fernet_key")
