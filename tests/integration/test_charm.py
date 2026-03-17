@@ -33,6 +33,10 @@ AIRFLOW_COMPONENTS = sorted(
     ]
 )
 
+# Populated during test_relate_and_config_validation so later tests can
+# verify the airflow keys remain identical across relation break/recreate cycles.
+_initial_airflow_keys: dict[str, str] = {}
+
 
 def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathlib.Path):
     """Deploy the charm under test."""
@@ -160,6 +164,11 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     assert f"secret_key = {sensitive['secret_key']}" in config
     assert f"jwt_secret = {sensitive['jwt_secret']}" in config
     assert f"fernet_key = {sensitive['fernet_key']}" in config
+
+    # Store initial key values for persistence checks in later tests
+    _initial_airflow_keys["secret_key"] = sensitive["secret_key"]
+    _initial_airflow_keys["jwt_secret"] = sensitive["jwt_secret"]
+    _initial_airflow_keys["fernet_key"] = sensitive["fernet_key"]
 
 
 def test_remove_and_recreate_integrations(juju: jubilant.Juju):
@@ -384,3 +393,27 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     assert len(sensitive["secret_key"]) == 64
     assert len(sensitive["jwt_secret"]) == 64
     assert len(sensitive["fernet_key"]) == 44
+
+
+def test_airflow_keys_persist_across_relation_cycles(juju: jubilant.Juju):
+    """Verify airflow keys remain identical after all relation break/recreate cycles."""
+    assert _initial_airflow_keys, (
+        "Initial keys not captured from test_relate_and_config_validation"
+    )
+
+    for component in AIRFLOW_COMPONENTS:
+        sensitive_data = juju.run(
+            f"airflow-{component}-mock/0",
+            "get-relation-sensitive-data",
+        ).results["sensitive-data"]
+
+        sensitive = json.loads(sensitive_data)
+        assert sensitive["secret_key"] == _initial_airflow_keys["secret_key"], (
+            f"{component}: secret_key changed after relation cycles"
+        )
+        assert sensitive["jwt_secret"] == _initial_airflow_keys["jwt_secret"], (
+            f"{component}: jwt_secret changed after relation cycles"
+        )
+        assert sensitive["fernet_key"] == _initial_airflow_keys["fernet_key"], (
+            f"{component}: fernet_key changed after relation cycles"
+        )

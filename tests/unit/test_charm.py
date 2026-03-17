@@ -383,7 +383,7 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
 
     # Secret ID stored in peer data, no plaintext fields
-    assert constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD in peer.local_app_data
+    assert constants.AIRFLOW_KEYS_SECRET in peer.local_app_data
     assert "secret_key" not in peer.local_app_data
     assert "jwt_secret" not in peer.local_app_data
     assert "fernet_key" not in peer.local_app_data
@@ -421,14 +421,14 @@ def test_runtime_secrets_reused_across_events(
         )
 
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
-    first_secret_id = peer.local_app_data[constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD]
+    first_secret_id = peer.local_app_data[constants.AIRFLOW_KEYS_SECRET]
     first_secret = [s for s in state_out.secrets if s.id == first_secret_id][0]
 
     # Run again with existing secret and peer data
     peer_with_secret_id = dataclasses.replace(
         peer_relation,
         local_app_data={
-            constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD: first_secret_id,
+            constants.AIRFLOW_KEYS_SECRET: first_secret_id,
             "db_migration_ran": "true",
         },
     )
@@ -456,7 +456,7 @@ def test_runtime_secrets_reused_across_events(
         )
 
     peer_2 = state_out_2.get_relations(constants.PEER_RELATION_NAME)[0]
-    assert peer_2.local_app_data[constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD] == first_secret_id
+    assert peer_2.local_app_data[constants.AIRFLOW_KEYS_SECRET] == first_secret_id
 
 
 def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
@@ -492,7 +492,7 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
     assert "secret_key" not in peer.local_app_data
     assert "jwt_secret" not in peer.local_app_data
     assert "fernet_key" not in peer.local_app_data
-    assert constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD in peer.local_app_data
+    assert constants.AIRFLOW_KEYS_SECRET in peer.local_app_data
 
     # Secret content contains generated values
     secret = [

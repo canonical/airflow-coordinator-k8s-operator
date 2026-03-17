@@ -56,9 +56,10 @@ class AirflowConfigGenerator:
     @property
     def sensitive_config_values(self) -> dict[str, str]:
         """All sensitive values that will be included in the Airflow config template."""
+        keys_content = self._charm.get_keys_secret().get_content()
         return {
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
-            "secret_key": self._charm._ensure_runtime_secret().get_content()["secret-key"],
-            "jwt_secret": self._charm._ensure_runtime_secret().get_content()["jwt-secret"],
-            "fernet_key": self._charm._ensure_runtime_secret().get_content()["fernet-key"],
+            "secret_key": keys_content["secret-key"],
+            "jwt_secret": keys_content["jwt-secret"],
+            "fernet_key": keys_content["fernet-key"],
         }

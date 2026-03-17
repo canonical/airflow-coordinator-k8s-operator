@@ -26,6 +26,8 @@ MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow v
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
 
-AIRFLOW_RUNTIME_SECRET_ID_FIELD = "airflow_runtime_secret_id"
-AIRFLOW_RUNTIME_SECRET_LABEL = "airflow-runtime-secrets"
-LEGACY_PEER_SECRET_FIELDS = ("secret_key", "jwt_secret", "fernet_key")
+AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
+AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+
+AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow keys"
+AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
