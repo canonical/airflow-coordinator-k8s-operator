@@ -149,12 +149,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """
         peer_data = self._peer_relation.data[self.app]
 
-        # Fast path: secret already tracked
         secret_id = peer_data.get(constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD)
         if secret_id:
             return self.model.get_secret(id=secret_id)
 
-        # Try to find an existing secret by label (e.g. after peer data loss)
         try:
             runtime_secret = self.model.get_secret(label=constants.AIRFLOW_RUNTIME_SECRET_LABEL)
         except ops.SecretNotFoundError:
@@ -163,15 +161,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 content, label=constants.AIRFLOW_RUNTIME_SECRET_LABEL
             )
 
-        # if not runtime_secret.id:
-        #     raise RuntimeError("Juju secret created without an ID")
-
         peer_data[constants.AIRFLOW_RUNTIME_SECRET_ID_FIELD] = runtime_secret.id
-
-        # Remove legacy plaintext fields
-        # for field in constants.LEGACY_PEER_SECRET_FIELDS:
-        #     peer_data.pop(field, None)
-
         return runtime_secret
 
     @property
