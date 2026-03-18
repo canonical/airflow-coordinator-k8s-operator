@@ -151,24 +151,24 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
 
     sensitive = json.loads(all_sensitive_data[0])
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
-    assert "secret_key" in sensitive
-    assert "jwt_secret" in sensitive
-    assert "fernet_key" in sensitive
-    assert len(sensitive["secret_key"]) == 64
-    assert len(sensitive["jwt_secret"]) == 64
+    assert "auth__secret_key" in sensitive
+    assert "api_auth__jwt_secret" in sensitive
+    assert "core__fernet_key" in sensitive
+    assert len(sensitive["auth__secret_key"]) == 64
+    assert len(sensitive["api_auth__jwt_secret"]) == 64
     # Fernet key is base64-encoded 32 bytes = 44 chars
-    assert len(sensitive["fernet_key"]) == 44
+    assert len(sensitive["core__fernet_key"]) == 44
 
     # Verify secret_key and jwt_secret are rendered in the config file
     config = next(iter(airflow_configs))
-    assert f"secret_key = {sensitive['secret_key']}" in config
-    assert f"jwt_secret = {sensitive['jwt_secret']}" in config
-    assert f"fernet_key = {sensitive['fernet_key']}" in config
+    assert f"secret_key = {sensitive['auth__secret_key']}" in config
+    assert f"jwt_secret = {sensitive['api_auth__jwt_secret']}" in config
+    assert f"fernet_key = {sensitive['core__fernet_key']}" in config
 
     # Store initial key values for persistence checks in later tests
-    _initial_airflow_keys["secret_key"] = sensitive["secret_key"]
-    _initial_airflow_keys["jwt_secret"] = sensitive["jwt_secret"]
-    _initial_airflow_keys["fernet_key"] = sensitive["fernet_key"]
+    _initial_airflow_keys["auth__secret_key"] = sensitive["auth__secret_key"]
+    _initial_airflow_keys["api_auth__jwt_secret"] = sensitive["api_auth__jwt_secret"]
+    _initial_airflow_keys["core__fernet_key"] = sensitive["core__fernet_key"]
 
 
 def test_remove_and_recreate_integrations(juju: jubilant.Juju):
@@ -244,12 +244,12 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
 
     sensitive = json.loads(all_sensitive_data[0])
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
-    assert "secret_key" in sensitive
-    assert "jwt_secret" in sensitive
-    assert "fernet_key" in sensitive
-    assert len(sensitive["secret_key"]) == 64
-    assert len(sensitive["jwt_secret"]) == 64
-    assert len(sensitive["fernet_key"]) == 44
+    assert "auth__secret_key" in sensitive
+    assert "api_auth__jwt_secret" in sensitive
+    assert "core__fernet_key" in sensitive
+    assert len(sensitive["auth__secret_key"]) == 64
+    assert len(sensitive["api_auth__jwt_secret"]) == 64
+    assert len(sensitive["core__fernet_key"]) == 44
 
 
 def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
@@ -327,12 +327,12 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
 
     sensitive = json.loads(all_sensitive_data[0])
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
-    assert "secret_key" in sensitive
-    assert "jwt_secret" in sensitive
-    assert "fernet_key" in sensitive
-    assert len(sensitive["secret_key"]) == 64
-    assert len(sensitive["jwt_secret"]) == 64
-    assert len(sensitive["fernet_key"]) == 44
+    assert "auth__secret_key" in sensitive
+    assert "api_auth__jwt_secret" in sensitive
+    assert "core__fernet_key" in sensitive
+    assert len(sensitive["auth__secret_key"]) == 64
+    assert len(sensitive["api_auth__jwt_secret"]) == 64
+    assert len(sensitive["core__fernet_key"]) == 44
 
 
 def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
@@ -387,12 +387,12 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
 
     sensitive = json.loads(all_sensitive_data[0])
     assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
-    assert "secret_key" in sensitive
-    assert "jwt_secret" in sensitive
-    assert "fernet_key" in sensitive
-    assert len(sensitive["secret_key"]) == 64
-    assert len(sensitive["jwt_secret"]) == 64
-    assert len(sensitive["fernet_key"]) == 44
+    assert "auth__secret_key" in sensitive
+    assert "api_auth__jwt_secret" in sensitive
+    assert "core__fernet_key" in sensitive
+    assert len(sensitive["auth__secret_key"]) == 64
+    assert len(sensitive["api_auth__jwt_secret"]) == 64
+    assert len(sensitive["core__fernet_key"]) == 44
 
 
 def test_airflow_keys_persist_across_relation_cycles(juju: jubilant.Juju):
@@ -408,12 +408,12 @@ def test_airflow_keys_persist_across_relation_cycles(juju: jubilant.Juju):
         ).results["sensitive-data"]
 
         sensitive = json.loads(sensitive_data)
-        assert sensitive["secret_key"] == _initial_airflow_keys["secret_key"], (
-            f"{component}: secret_key changed after relation cycles"
+        assert sensitive["auth__secret_key"] == _initial_airflow_keys["auth__secret_key"], (
+            f"{component}: auth__secret_key changed after relation cycles"
         )
-        assert sensitive["jwt_secret"] == _initial_airflow_keys["jwt_secret"], (
-            f"{component}: jwt_secret changed after relation cycles"
+        assert sensitive["api_auth__jwt_secret"] == _initial_airflow_keys["api_auth__jwt_secret"], (
+            f"{component}: api_auth__jwt_secret changed after relation cycles"
         )
-        assert sensitive["fernet_key"] == _initial_airflow_keys["fernet_key"], (
-            f"{component}: fernet_key changed after relation cycles"
+        assert sensitive["core__fernet_key"] == _initial_airflow_keys["core__fernet_key"], (
+            f"{component}: core__fernet_key changed after relation cycles"
         )
