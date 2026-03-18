@@ -179,6 +179,8 @@ def write_airflow_config(
     config_path: str,
     config_template: str,
     sensitive_data: dict[str, str],
+    user: str,
+    group: str,
 ) -> None:
     """Render and write the Airflow config to a container.
 
@@ -190,6 +192,8 @@ def write_airflow_config(
         config_path: Path where the config file will be written.
         config_template: The Jinja2 template string for the Airflow config.
         sensitive_data: Dictionary of sensitive values to render in the template.
+        user: The OS user that will own the written config file.
+        group: The OS group that will own the written config file.
 
     Raises:
         RuntimeError: If unable to connect to the container or write the config.
@@ -203,8 +207,8 @@ def write_airflow_config(
         container.push(
             config_path,
             config,
-            user=WORKLOAD_USER,
-            group=WORKLOAD_GROUP,
+            user=user,
+            group=group,
             make_dirs=True,
         )
         logger.info(f"Successfully wrote Airflow config to {config_path}")
@@ -960,6 +964,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             config_path=config_path,
             config_template=provider_content.config_template,
             sensitive_data=json.loads(provider_content.sensitive_data),
+            user=WORKLOAD_USER,
+            group=WORKLOAD_GROUP,
         )
 
     @property

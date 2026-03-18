@@ -230,6 +230,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_CONFIG_PATH,
             self._config_generator.config_template,
             self._config_generator.sensitive_config_values,
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )
 
     def _run_db_migrate(self) -> None:
