@@ -6,9 +6,9 @@
 
 import logging
 
+import constants
 import ops
 from charms.airflow_coordinator_k8s.v0 import airflow_coordinator
-import constants
 
 logger = logging.getLogger(__name__)
 
