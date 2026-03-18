@@ -59,7 +59,7 @@ class AirflowConfigGenerator:
         keys_content = self._charm.get_keys_secret().get_content()
         return {
             "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
-            "secret_key": keys_content["secret-key"],
-            "jwt_secret": keys_content["jwt-secret"],
-            "fernet_key": keys_content["fernet-key"],
+            "api__secret_key": keys_content["secret-key"],
+            "api_auth__jwt_secret": keys_content["jwt-secret"],
+            "core__fernet_key": keys_content["fernet-key"],
         }
