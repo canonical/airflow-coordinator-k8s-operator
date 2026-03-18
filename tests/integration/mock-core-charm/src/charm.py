@@ -98,7 +98,11 @@ class MockCoreCharmCharm(ops.CharmBase):
             return
 
         if self.config_requirer.can_write_airflow_config:
-            self.config_requirer.write_airflow_config(AIRFLOW_CONFIG_PATH)
+            self.config_requirer.write_airflow_config(
+                AIRFLOW_CONFIG_PATH,
+                user=airflow_coordinator.WORKLOAD_USER,
+                group=airflow_coordinator.WORKLOAD_GROUP,
+            )
         else:
             self.unit.status = ops.BlockedStatus("Waiting for config from coordinator")
             return

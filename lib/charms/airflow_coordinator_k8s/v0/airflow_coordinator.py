@@ -167,9 +167,6 @@ LIBAPI = 0
 # to 0 if you are raising the major API version
 LIBPATCH = 5
 
-WORKLOAD_USER = "ubuntu"
-WORKLOAD_GROUP = "ubuntu"
-
 
 logger = logging.getLogger(__name__)
 
@@ -956,7 +953,7 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
 
         return on_disk_config != rendered_config
 
-    def write_airflow_config(self, config_path: str) -> None:
+    def write_airflow_config(self, config_path: str, user: str, group: str) -> None:
         """Render and write the Airflow config in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
         write_airflow_config(
@@ -964,8 +961,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             config_path=config_path,
             config_template=provider_content.config_template,
             sensitive_data=json.loads(provider_content.sensitive_data),
-            user=WORKLOAD_USER,
-            group=WORKLOAD_GROUP,
+            user=user,
+            group=group,
         )
 
     @property
@@ -982,7 +979,7 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             and self._requirer_handler.provider_content.kubernetes_executor_pod_spec
         )
 
-    def write_kubernetes_executor_pod_spec(self, filepath: str) -> None:
+    def write_kubernetes_executor_pod_spec(self, filepath: str, user: str, group: str) -> None:
         """Render the K8s executor pod spec in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
 
@@ -993,8 +990,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
         self._workload_container.push(
             filepath,
             k8s_executor_pod_spec,
-            user=WORKLOAD_USER,
-            group=WORKLOAD_GROUP,
+            user=user,
+            group=group,
             make_dirs=True,
         )
 

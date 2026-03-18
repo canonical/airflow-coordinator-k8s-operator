@@ -16,6 +16,8 @@ import ops
 import ops.testing
 import pytest
 
+import constants
+
 logger = logging.getLogger(__name__)
 
 AIRFLOW_COORDINATOR_RELATION_INTERFACE = "airflow-coordinator"
@@ -605,7 +607,11 @@ class TestAirflowCoordinatorCoreRequires:
 
             assert manager.charm.requirer.can_write_airflow_config
 
-            manager.charm.requirer.write_airflow_config("/config/path")
+            manager.charm.requirer.write_airflow_config(
+                "/config/path",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
+            )
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
                 application_context
@@ -646,7 +652,11 @@ class TestAirflowCoordinatorCoreRequires:
         ) as manager:
             manager.run()
 
-            manager.charm.requirer.write_airflow_config("/config/path")
+            manager.charm.requirer.write_airflow_config(
+                "/config/path",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
+            )
             assert not manager.charm.requirer.airflow_config_needs_update("/config/path")
 
     def test_airflow_config_needs_update_returns_true_when_config_changed(
@@ -789,7 +799,9 @@ class TestAirflowCoordinatorCoreRequires:
             assert manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
             manager.charm.requirer.write_kubernetes_executor_pod_spec(
-                "/k8s_executor_pod_spec/path"
+                "/k8s_executor_pod_spec/path",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
             )
 
             filesystem = state_out.get_container("workload-container").get_filesystem(
