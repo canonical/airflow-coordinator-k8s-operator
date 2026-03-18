@@ -6,7 +6,6 @@
 
 import logging
 
-import constants
 import ops
 from charms.airflow_coordinator_k8s.v0 import airflow_coordinator
 
@@ -18,6 +17,8 @@ CONTAINER_NAME = "workload"
 AIRFLOW_CONFIG_PATH = "/airflow.cfg"
 K8S_EXECUTOR_POD_SPEC_PATH = "/k8s_executor_pod_spec"
 
+WORKLOAD_USER = "ubuntu"
+WORKLOAD_GROUP = "ubuntu"
 
 class MockCoreCharmCharm(ops.CharmBase):
     """Charm that indicates the state of relation with Airflow Coordinator."""
@@ -101,8 +102,8 @@ class MockCoreCharmCharm(ops.CharmBase):
         if self.config_requirer.can_write_airflow_config:
             self.config_requirer.write_airflow_config(
                 AIRFLOW_CONFIG_PATH,
-                user=constants.WORKLOAD_USER,
-                group=constants.WORKLOAD_GROUP,
+                user=WORKLOAD_USER,
+                group=WORKLOAD_GROUP,
             )
         else:
             self.unit.status = ops.BlockedStatus("Waiting for config from coordinator")
