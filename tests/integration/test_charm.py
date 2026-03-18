@@ -411,9 +411,9 @@ def test_airflow_keys_persist_across_relation_cycles(juju: jubilant.Juju):
         assert sensitive["auth__secret_key"] == _initial_airflow_keys["auth__secret_key"], (
             f"{component}: auth__secret_key changed after relation cycles"
         )
-        assert sensitive["api_auth__jwt_secret"] == _initial_airflow_keys["api_auth__jwt_secret"], (
-            f"{component}: api_auth__jwt_secret changed after relation cycles"
-        )
+        assert (
+            sensitive["api_auth__jwt_secret"] == _initial_airflow_keys["api_auth__jwt_secret"]
+        ), f"{component}: api_auth__jwt_secret changed after relation cycles"
         assert sensitive["core__fernet_key"] == _initial_airflow_keys["core__fernet_key"], (
             f"{component}: core__fernet_key changed after relation cycles"
         )
