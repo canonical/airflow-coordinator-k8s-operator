@@ -3,9 +3,10 @@
 
 """Charm support for the Airflow config generation."""
 
+import configparser
+import io
 import logging
 import pathlib
-import re
 
 import ops
 
@@ -47,63 +48,39 @@ class AirflowConfigGenerator:
 
         return f"postgresql+psycopg2://{username}:{password}@{endpoints[0]}/{database}"
 
-    @staticmethod
-    def _section_body(template: str, section: str) -> str | None:
-        """Return the text between a section header and the next header (or EOF)."""
-        match = re.search(
-            rf"^\[{re.escape(section)}\][^\S\n]*\n(.*?)(?=^\[|\Z)",
-            template,
-            re.MULTILINE | re.DOTALL,
-        )
-        return match.group(1) if match else None
-
     def config_template_with_extra_config(self, **extra_config) -> str:
-        """Return the Airflow config template merged with extra config from different integrators.
+        """Return the Airflow config template merged with extra config from different sources.
 
-        Existing keys are replaced with the integrator's value, new keys are
-        inserted under the existing section header, and entirely new sections
-        are appended.  This avoids ``DuplicateSectionError`` from ConfigParser
-        while allowing integrators to override defaults.
+        Uses configparser to parse and merge sections/keys, and ignores Jinja2
+        placeholders (via the RawConfigParser()).
+        Existing keys are overwritten, new keys are added to existing sections,
+        and entirely new sections are appended.
 
         Returns:
             Combined Jinja2 template string ready to share with core charms.
         """
-        # FIXME: this regex-based merge is fragile. A more elegant solution
-        # would be to use configparser or Jinja2 native solutions, which requires
-        # changes to the library and the core charms.
-        result = self.config_template
+        base_template = self.config_template
         if not extra_config:
-            return result
+            return base_template
 
-        new_sections = []
+        # NOTE: RawConfigParser treats Jinja2 condition-wrapped options
+        # (e.g. ``{% if x %}key = val{% endif %}``) as a single option whose
+        # name includes the Jinja2 prefix.  Overriding such an option via
+        # extra_config would add a *new* option instead of replacing it.
+        # This is acceptable today because no extra_config key conflicts with
+        # a condition-wrapped option in the template.
+        parser = configparser.RawConfigParser()
+        parser.read_string(base_template)
+
         for section, keys in extra_config.items():
-            body = self._section_body(result, section)
-            if body is not None:
-                existing_keys = set(re.findall(r"^(\w+)\s*=", body, re.MULTILINE))
-                new_key_lines = []
-                for k, v in keys.items():
-                    if k in existing_keys:
-                        result = re.sub(
-                            rf"^({re.escape(k)}\s*=\s*).*$",
-                            rf"\g<1>{v}",
-                            result,
-                            count=1,
-                            flags=re.MULTILINE,
-                        )
-                    else:
-                        new_key_lines.append(f"{k} = {v}")
-                if new_key_lines:
-                    key_lines = "\n".join(new_key_lines)
-                    pattern = rf"(\[{re.escape(section)}\][^\S\n]*\n)"
-                    result = re.sub(pattern, rf"\g<1>{key_lines}\n", result, count=1)
-            else:
-                key_lines = "\n".join(f"{k} = {v}" for k, v in keys.items())
-                new_sections.append(f"\n[{section}]\n{key_lines}")
+            if not parser.has_section(section):
+                parser.add_section(section)
+            for k, v in keys.items():
+                parser.set(section, k, v)
 
-        if new_sections:
-            result += "\n".join(new_sections) + "\n"
-
-        return result
+        output = io.StringIO()
+        parser.write(output)
+        return output.getvalue()
 
     @property
     def api_server_config(self) -> dict[str, dict[str, str]]:

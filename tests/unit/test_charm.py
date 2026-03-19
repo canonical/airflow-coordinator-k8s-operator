@@ -288,7 +288,7 @@ def test_db_migration_does_not_run_on_state_true(
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_in = ops.testing.State(
@@ -317,7 +317,7 @@ def test_db_migration_runs_on_state_false(
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_in = ops.testing.State(
@@ -342,7 +342,7 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -390,7 +390,7 @@ class TestKubernetesExecutorConfig:
         with unittest.mock.patch(
             "config_generator.AirflowConfigGenerator.config_template",
             new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
             ),
         ), unittest.mock.patch.object(
             AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
@@ -413,7 +413,7 @@ class TestKubernetesExecutorConfig:
         with unittest.mock.patch(
             "config_generator.AirflowConfigGenerator.config_template",
             new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
             ),
         ), unittest.mock.patch.object(
             AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
@@ -440,7 +440,7 @@ class TestKubernetesExecutorConfig:
         with unittest.mock.patch(
             "config_generator.AirflowConfigGenerator.config_template",
             new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
             ),
         ), unittest.mock.patch.object(
             AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
@@ -466,7 +466,7 @@ class TestKubernetesExecutorConfig:
         with unittest.mock.patch(
             "config_generator.AirflowConfigGenerator.config_template",
             new_callable=unittest.mock.PropertyMock(
-                return_value="mock_config: {{ sql_alchemy_connection_string }}"
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
             ),
         ):
             state_out = context.run(context.on.start(), state)

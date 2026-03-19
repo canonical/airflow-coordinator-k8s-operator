@@ -3,7 +3,5 @@ executor = {{ executor | default('LocalExecutor') }}
 load_examples = False
 
 [database]
-{%- if render_sensitive_data %}
-sql_alchemy_conn = {{ database__sql_alchemy_conn }}
-{%- endif %}
+{% if render_sensitive_data %}sql_alchemy_conn = {{ database__sql_alchemy_conn }}{% endif %}
 

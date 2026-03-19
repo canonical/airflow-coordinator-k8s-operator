@@ -311,6 +311,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 self._run_db_migrate()
                 self._db_migration_ran = True
 
+            # We can decide which extra config we want to pass to the config_generator
+            # Right now we only have one extra, but in the future we can make decisions
+            # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
                 self._config_generator.config_template_with_extra_config(
                     **self._config_generator.api_server_config,
