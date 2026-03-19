@@ -150,7 +150,7 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     )
 
     sensitive = json.loads(all_sensitive_data[0])
-    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "postgresql+psycopg2://" in sensitive["database__sql_alchemy_conn"]
     assert "api__secret_key" in sensitive
     assert "api_auth__jwt_secret" in sensitive
     assert "core__fernet_key" in sensitive
@@ -243,7 +243,7 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
     assert len(all_sensitive_data) == 1
 
     sensitive = json.loads(all_sensitive_data[0])
-    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "postgresql+psycopg2://" in sensitive["database__sql_alchemy_conn"]
     assert "api__secret_key" in sensitive
     assert "api_auth__jwt_secret" in sensitive
     assert "core__fernet_key" in sensitive
@@ -326,7 +326,7 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
     assert len(all_sensitive_data) == 1
 
     sensitive = json.loads(all_sensitive_data[0])
-    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "postgresql+psycopg2://" in sensitive["database__sql_alchemy_conn"]
     assert "api__secret_key" in sensitive
     assert "api_auth__jwt_secret" in sensitive
     assert "core__fernet_key" in sensitive
@@ -386,7 +386,7 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
     assert len(all_sensitive_data) == 1
 
     sensitive = json.loads(all_sensitive_data[0])
-    assert "postgresql+psycopg2://" in sensitive["sql_alchemy_connection_string"]
+    assert "postgresql+psycopg2://" in sensitive["database__sql_alchemy_conn"]
     assert "api__secret_key" in sensitive
     assert "api_auth__jwt_secret" in sensitive
     assert "core__fernet_key" in sensitive

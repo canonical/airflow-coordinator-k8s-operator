@@ -28,8 +28,8 @@ class AirflowConfigGenerator:
             .from_string(config_template)
             .render(
                 {
-                    "api_server_base_url": f"http://{self._charm._api_server_requires.api_server_host}:{self._charm._api_server_requires.api_server_port}",
-                    "api_server_port": self._charm._api_server_requires.api_server_port,
+                    "api__base_url": f"http://{self._charm._api_server_requires.api_server_host}:{self._charm._api_server_requires.api_server_port}",
+                    "api__port": self._charm._api_server_requires.api_server_port,
                 }
             )
         )
@@ -58,7 +58,7 @@ class AirflowConfigGenerator:
         """All sensitive values that will be included in the Airflow config template."""
         keys_content = self._charm.get_keys_secret().get_content()
         return {
-            "sql_alchemy_connection_string": self._sql_alchemy_connection_string,
+            "database__sql_alchemy_conn": self._sql_alchemy_connection_string,
             "api__secret_key": keys_content["secret-key"],
             "api_auth__jwt_secret": keys_content["jwt-secret"],
             "core__fernet_key": keys_content["fernet-key"],

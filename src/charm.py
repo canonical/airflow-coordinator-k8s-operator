@@ -167,19 +167,19 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     def get_keys_secret(self) -> ops.Secret:
         """Retrieve the Juju application secret containing airflow keys."""
         keys_secret_id = self.peer_application_data.get(constants.AIRFLOW_KEYS_SECRET)
-        if keys_secret_id:
-            try:
-                return self.model.get_secret(
-                    id=keys_secret_id, label=constants.AIRFLOW_KEYS_SECRET_LABEL
-                )
-            except (ops.SecretNotFoundError, ops.ModelError):
-                logger.error(constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE)
-                raise ExceptionWithStatusError(
-                    constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
-                )
-        raise ExceptionWithStatusError(
-            constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
-        )
+        if not keys_secret_id:
+            raise ExceptionWithStatusError(
+                constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
+            )
+        try:
+            return self.model.get_secret(
+                id=keys_secret_id, label=constants.AIRFLOW_KEYS_SECRET_LABEL
+            )
+        except (ops.SecretNotFoundError, ops.ModelError):
+            logger.error(constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE)
+            raise ExceptionWithStatusError(
+                constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
+            )
 
     @property
     def _db_migration_ran(self) -> bool:

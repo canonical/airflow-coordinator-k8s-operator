@@ -287,7 +287,7 @@ def test_db_migration_does_not_run_on_state_true(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -320,7 +320,7 @@ def test_db_migration_runs_on_state_false(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -349,7 +349,7 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -372,7 +372,7 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -405,7 +405,7 @@ def test_runtime_secrets_reused_across_events(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -439,7 +439,7 @@ def test_runtime_secrets_reused_across_events(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
@@ -471,7 +471,7 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="mock_config: "
-            "{{ sql_alchemy_connection_string }} "
+            "{{ database__sql_alchemy_conn }} "
             "{{ secret_key }} "
             "{{ jwt_secret }} "
             "{{ fernet_key }}"
