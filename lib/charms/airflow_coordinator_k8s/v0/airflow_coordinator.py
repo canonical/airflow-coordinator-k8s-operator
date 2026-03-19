@@ -165,9 +165,8 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 4
+LIBPATCH = 5
 
-# TODO: add your code here! Happy coding!
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +176,8 @@ def write_airflow_config(
     config_path: str,
     config_template: str,
     sensitive_data: dict[str, str],
+    user: str,
+    group: str,
 ) -> None:
     """Render and write the Airflow config to a container.
 
@@ -188,6 +189,8 @@ def write_airflow_config(
         config_path: Path where the config file will be written.
         config_template: The Jinja2 template string for the Airflow config.
         sensitive_data: Dictionary of sensitive values to render in the template.
+        user: The OS user that will own the written config file.
+        group: The OS group that will own the written config file.
 
     Raises:
         RuntimeError: If unable to connect to the container or write the config.
@@ -201,8 +204,8 @@ def write_airflow_config(
         container.push(
             config_path,
             config,
-            user="root",
-            group="root",
+            user=user,
+            group=group,
             make_dirs=True,
         )
         logger.info(f"Successfully wrote Airflow config to {config_path}")
@@ -950,7 +953,7 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
 
         return on_disk_config != rendered_config
 
-    def write_airflow_config(self, config_path: str) -> None:
+    def write_airflow_config(self, config_path: str, user: str, group: str) -> None:
         """Render and write the Airflow config in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
         write_airflow_config(
@@ -958,6 +961,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             config_path=config_path,
             config_template=provider_content.config_template,
             sensitive_data=json.loads(provider_content.sensitive_data),
+            user=user,
+            group=group,
         )
 
     @property
@@ -974,7 +979,7 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             and self._requirer_handler.provider_content.kubernetes_executor_pod_spec
         )
 
-    def write_kubernetes_executor_pod_spec(self, filepath: str) -> None:
+    def write_kubernetes_executor_pod_spec(self, filepath: str, user: str, group: str) -> None:
         """Render the K8s executor pod spec in the provided path in the workload container."""
         provider_content = self._requirer_handler.provider_content
 
@@ -985,8 +990,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
         self._workload_container.push(
             filepath,
             k8s_executor_pod_spec,
-            user="root",
-            group="root",
+            user=user,
+            group=group,
             make_dirs=True,
         )
 
