@@ -3,6 +3,7 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+import configparser
 import dataclasses
 import json
 import unittest.mock
@@ -10,9 +11,11 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
+from conftest import MOCK_KUBERNETES_EXECUTOR_CONFIG, MOCK_KUBERNETES_EXECUTOR_POD_SPEC
 
 import command_executor
 import constants
+from charm import AirflowCoordinatorK8SOperatorCharm
 
 
 def test_non_leader_unit(context, state, mock_command_executor):
@@ -286,7 +289,7 @@ def test_db_migration_does_not_run_on_state_true(
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_in = ops.testing.State(
@@ -315,7 +318,7 @@ def test_db_migration_runs_on_state_false(
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_in = ops.testing.State(
@@ -340,7 +343,7 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
-            return_value="mock_config: {{ sql_alchemy_connection_string }}"
+            return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
         state_out = context.run(context.on.pebble_ready(workload_container), state)
@@ -350,6 +353,111 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):
         assert "config-template" not in relation.local_app_data
+
+
+class TestKubernetesExecutorConfig:
+    def test_kubernetes_executor_config_returns_none_without_relation(
+        self, context, state, mock_command_executor
+    ):
+        """Verify _kubernetes_executor_config returns None when relation is absent."""
+        with context(context.on.start(), state) as manager:
+            charm = manager.charm
+            assert charm._kubernetes_executor_config is None
+
+    def test_kubernetes_executor_config_returns_none_when_relation_empty(
+        self,
+        context,
+        all_required_relations,
+        kubernetes_executor_config_relation_empty,
+        workload_container,
+        mock_command_executor,
+    ):
+        """Verify _kubernetes_executor_config returns None when relation has no data yet."""
+        all_required_relations.append(kubernetes_executor_config_relation_empty)
+        state = ops.testing.State(
+            leader=True,
+            containers=[workload_container],
+            relations=all_required_relations,
+        )
+
+        with context(context.on.start(), state) as manager:
+            charm = manager.charm
+            assert charm._kubernetes_executor_config is None
+
+    def test_kubernetes_executor_config_merges_into_distributed_template(
+        self, context, state, mock_command_executor
+    ):
+        """Verify executor config sections are merged into the distributed config template."""
+        with unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.config_template",
+            new_callable=unittest.mock.PropertyMock(
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+            ),
+        ), unittest.mock.patch.object(
+            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
+            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
+        ):
+            state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+            assert parsed["core"]["executor"] == "KubernetesExecutor"
+            assert parsed["kubernetes_executor"]["namespace"] == "airflow-ns"
+            assert parsed["kubernetes_executor"]["base_image"] == "airflow:latest"
+
+    def test_kubernetes_executor_pod_spec_returns_none_without_relation(
+        self, context, state, mock_command_executor
+    ):
+        """Verify _kubernetes_executor_pod_spec returns None when relation is absent."""
+        with context(context.on.start(), state) as manager:
+            charm = manager.charm
+            assert charm._kubernetes_executor_pod_spec is None
+
+    def test_kubernetes_executor_pod_spec_distributed_to_core_charms(
+        self, context, state, mock_command_executor
+    ):
+        """Verify the pod spec template is distributed to core charms."""
+        with unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.config_template",
+            new_callable=unittest.mock.PropertyMock(
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+            ),
+        ), unittest.mock.patch.object(
+            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
+            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
+        ), unittest.mock.patch.object(
+            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_pod_spec",
+            new_callable=unittest.mock.PropertyMock(
+                return_value=MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+            ),
+        ):
+            state_out = context.run(context.on.start(), state)
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            assert (
+                relation.local_app_data.get("kubernetes-executor-pod-spec")
+                == MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+            )
+
+    def test_default_executor_is_local_without_kubernetes_executor_relation(
+        self, context, state, mock_command_executor
+    ):
+        """Verify executor defaults to LocalExecutor when no executor relation exists."""
+        with unittest.mock.patch(
+            "config_generator.AirflowConfigGenerator.config_template",
+            new_callable=unittest.mock.PropertyMock(
+                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+            ),
+        ):
+            state_out = context.run(context.on.start(), state)
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            assert "executor = KubernetesExecutor" not in config_template
 
 
 class TestPebbleLayer:

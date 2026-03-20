@@ -146,7 +146,7 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     )
     assert (
         "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
+        in json.loads(all_sensitive_data[0])["database__sql_alchemy_conn"]
     )
 
 
@@ -223,7 +223,7 @@ def test_remove_and_recreate_integrations(juju: jubilant.Juju):
 
     assert (
         "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
+        in json.loads(all_sensitive_data[0])["database__sql_alchemy_conn"]
     )
 
 
@@ -302,7 +302,7 @@ def test_remove_and_recreate_limited_integrations(juju: jubilant.Juju):
 
     assert (
         "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
+        in json.loads(all_sensitive_data[0])["database__sql_alchemy_conn"]
     )
 
 
@@ -358,5 +358,5 @@ def test_break_and_recreate_postgres_relation(juju: jubilant.Juju):
 
     assert (
         "postgresql+psycopg2://"
-        in json.loads(all_sensitive_data[0])["sql_alchemy_connection_string"]
+        in json.loads(all_sensitive_data[0])["database__sql_alchemy_conn"]
     )
