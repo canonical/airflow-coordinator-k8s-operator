@@ -3,6 +3,7 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+import configparser
 import dataclasses
 import json
 import unittest.mock
@@ -402,28 +403,11 @@ class TestKubernetesExecutorConfig:
 
         for relation in state_out.get_relations("airflow-coordinator"):
             config_template = relation.local_app_data.get("config-template", "")
-            assert "[kubernetes_executor]" in config_template
-            assert "namespace = airflow-ns" in config_template
-            assert "base_image = airflow:latest" in config_template
-
-    def test_kubernetes_executor_config_sets_executor_in_core_section(
-        self, context, state, mock_command_executor
-    ):
-        """Verify KubernetesExecutor is merged into the [core] section."""
-        with unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
-            ),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
-            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
-        ):
-            state_out = context.run(context.on.start(), state)
-
-        for relation in state_out.get_relations("airflow-coordinator"):
-            config_template = relation.local_app_data.get("config-template", "")
-            assert "executor = KubernetesExecutor" in config_template
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+            assert parsed["core"]["executor"] == "KubernetesExecutor"
+            assert parsed["kubernetes_executor"]["namespace"] == "airflow-ns"
+            assert parsed["kubernetes_executor"]["base_image"] == "airflow:latest"
 
     def test_kubernetes_executor_pod_spec_returns_none_without_relation(
         self, context, state, mock_command_executor
