@@ -23,15 +23,30 @@ class AirflowConfigGenerator:
         with open("src/templates/airflow_config.j2") as config_template_file:
             config_template = config_template_file.read()
 
+        render_context = {
+            "api_server_base_url": f"http://{self._charm._api_server_requires.api_server_host}:{self._charm._api_server_requires.api_server_port}",
+            "api_server_port": self._charm._api_server_requires.api_server_port,
+        }
+
+        s3_dag_bundles = [
+            {
+                "name": f"s3_{relation_id}_dag_bundle",
+                "classpath": "airflow.providers.amazon.aws.bundles.s3",
+                "kwargs": {
+                    "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                    "bucket_name": connection_info["bucket"],
+                    "prefix": connection_info.get("path", ""),
+                },
+            }
+            for relation_id, connection_info in self._charm.s3_connections.items()
+        ]
+        if s3_dag_bundles:
+            render_context["dag_bundles"] = s3_dag_bundles
+
         return (
             jinja2.Environment(loader=jinja2.BaseLoader(), undefined=jinja2.DebugUndefined)
             .from_string(config_template)
-            .render(
-                {
-                    "api_server_base_url": f"http://{self._charm._api_server_requires.api_server_host}:{self._charm._api_server_requires.api_server_port}",
-                    "api_server_port": self._charm._api_server_requires.api_server_port,
-                }
-            )
+            .render(render_context)
         )
 
     @property

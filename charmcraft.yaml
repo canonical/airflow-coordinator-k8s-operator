@@ -59,6 +59,8 @@ requires:
   airflow-api-server:
     interface: airflow_api_server
     limit: 1
+  s3:
+    interface: s3
 
 peers:
   coordinator-peers:

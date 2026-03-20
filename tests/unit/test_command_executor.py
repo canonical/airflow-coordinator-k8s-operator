@@ -73,4 +73,4 @@ class TestCommandExecutor:
         with pytest.raises(command_executor.CommandExecutionError) as exc_info:
             executor.run_db_migrate()
 
-        assert "Failed to execute 'airflow db migrate'" in str(exc_info.value)
+        assert "Failed to execute command with error: Unexpected error" in str(exc_info.value)

@@ -4,12 +4,18 @@
 
 """The Airflow Coordinator charm application."""
 
+import functools
+import json
 import logging
+import re
+import typing
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
+import charms.data_platform_libs.v0.s3 as s3
 import ops
+import pydantic
 from ops.pebble import LayerDict
 
 import command_executor
@@ -31,6 +37,19 @@ class ExceptionWithStatusError(Exception):
     def status(self):
         """Returns an instance of self.status_type with a message."""
         return self.status_type(self.message)
+
+
+class S3ConnectionInfo(pydantic.BaseModel):
+    """Pydantic model to represent the S3 connection info from s3 relations."""
+
+    bucket: str = pydantic.Field()
+    access_key: str = pydantic.Field(alias="access-key")
+    secret_key: str = pydantic.Field(alias="secret-key")
+
+    path: str | None = pydantic.Field(default=None)
+    endpoint: str | None = pydantic.Field(default=None)
+    region: str | None = pydantic.Field(default=None)
+    tls_ca_chain: str | None = pydantic.Field(default=None, alias="tls-ca-chain")
 
 
 class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
@@ -59,6 +78,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_API_SERVER_ENDPOINT_NAME,
             callback=self._reconcile,
         )
+        self._s3_requires = s3.S3Requirer(self, constants.S3_ENDPOINT_NAME)
 
         for event in [
             self.on.start,
@@ -67,6 +87,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
+            self._s3_requires.on.credentials_changed,
+            self._s3_requires.on.credentials_gone,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -139,6 +161,58 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         # We need to cast the bool to str, Juju relation data bags can only store strings
         self._peer_relation.data[self.app]["db_migration_ran"] = str(value).lower()
 
+    @functools.cached_property
+    def _airflow_connection_ids(self) -> dict[str, str]:
+        """Airflow connection IDs keyed by relation id (for DAG bundle connections)."""
+
+        class AirflowConnectionDict(dict):
+            def __init__(cls, *args, **kwargs):  # noqa: N805
+                super().__init__(*args, **kwargs)
+
+                for key, value in json.loads(
+                    self._peer_relation.data[self.app].get("airflow_connection_ids", "{}")
+                ).items():
+                    cls[key] = value
+
+            def __setitem__(cls, key, value):  # noqa: N805
+                if not value:
+                    del cls[key]
+                else:
+                    cls[key] = value
+
+                self._peer_relation.data[self.app]["airflow_connection_ids"] = json.dumps(cls)
+
+        return AirflowConnectionDict()
+
+    @property
+    def s3_connections(self) -> dict[int, S3ConnectionInfo]:
+        """S3 connections for DAG bundles from related S3 integrator charms."""
+        if not self._s3_requires.relations:
+            return {}
+
+        def _convert_to_pydantic_model(
+            connection_info: dict[str, str],
+        ) -> typing.Optional[S3ConnectionInfo]:
+            """Convert dict containing S3 connection info into pydantic model."""
+            try:
+                return S3ConnectionInfo.model_construct(**connection_info)
+            except Exception:
+                return None
+
+        # TODO: fix so that we get all s3 relation connection infos from the lib
+        return {
+            relation.id: connection_info
+            for relation in self._s3_requires.relations
+            if relation
+            and relation.app
+            and (
+                connection_info := _convert_to_pydantic_model(
+                    **self._s3_requires._load_relation_data(relation.data[relation.app])
+                )
+            )
+            is not None
+        }
+
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
         # TODO: add k8s executor configurator relation here too
@@ -149,7 +223,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             ]
         )
 
-    def _perform_checks(self) -> None:
+    def _perform_checks(self) -> None:  # noqa: C901
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self._container.can_connect():
             raise ExceptionWithStatusError(
@@ -211,6 +285,61 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
+        if self._s3_requires.relations:
+            errorneous_relation_ids = [
+                relation_id
+                for relation_id in self._s3_requires.relations
+                if relation_id not in self.s3_connections
+            ]
+
+            if errorneous_relation_ids:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
+                        relation_ids=", ".join(errorneous_relation_ids)
+                    ),
+                    ops.BlockedStatus,
+                )
+
+    def _reconcile_dag_bundle_remote_connections(self) -> None:
+        """Create/delete necessary Airflow connections for DAG bundle remotes."""
+        if not self.unit.is_leader():
+            return
+
+        s3_connections = self.s3_connections
+
+        for relation_id, connection_info in s3_connections.items():
+            connection_id = f"s3_relation_{relation_id}_connection"
+
+            existing_connection_info = self._airflow_connection_ids.get(connection_id, {})
+
+            if existing_connection_info != connection_info:
+                logger.info(
+                    f"Connection info for {connection_id} changed. Updating Airflow connection"
+                )
+
+                self._command_executor.add_airflow_s3_connection(
+                    connection_id,
+                    connection_info["access-key"],
+                    connection_info["secret-key"],
+                    region=connection_info.get("region"),
+                    endpoint=connection_info.get("endpoint"),
+                    tls_ca_chain=connection_info.get("tls-ca-chain"),
+                )
+
+                self._airflow_connection_ids[connection_id] = connection_info
+
+        for airflow_connection_id in self._airflow_connection_ids:
+            connection_id_pattern = r"([\w_]+)_relation_(\d+)_connection"
+            match = re.match(connection_id_pattern, airflow_connection_id)
+
+            # TODO also ensure relation_id not in git connections
+            if int(match.group(2)) not in self.s3_connections:
+                logger.info(f"Deleting Airflow connection {airflow_connection_id}")
+
+                self._command_executor.delete_airflow_connection(airflow_connection_id)
+
+                self._airflow_connection_ids[airflow_connection_id] = None
+
     def _configure_pebble_layer(self) -> None:
         """Configure the Pebble layer to disable the default airflow service.
 
@@ -247,6 +376,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         try:
             self._perform_checks()
+            self._reconcile_dag_bundle_remote_connections()
             self._configure_pebble_layer()
             self._write_airflow_config()
 

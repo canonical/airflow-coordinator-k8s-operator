@@ -5,6 +5,7 @@
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
+S3_ENDPOINT_NAME = "s3"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -25,3 +26,4 @@ WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE = "Waiting for host+port information fr
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
+INVALID_S3_RELATIONS_MESSAGE_TEMPLATE = "Invalid S3 relations: {relation_ids}"

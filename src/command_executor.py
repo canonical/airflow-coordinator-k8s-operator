@@ -3,6 +3,8 @@
 
 """Command execution support for the Airflow Coordinator charm."""
 
+import functools
+import json
 import logging
 import typing
 
@@ -30,6 +32,60 @@ class CommandExecutionResult(typing.NamedTuple):
     return_code: int | None
 
 
+def execute_pebble_exec_process(func: typing.Callable):
+    """Decorator to standardize CommandExecutor methods that run ops.pebble.ExecProcess."""
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        """Execute the ops.pebble.ExecProcess returned by func with sensible checks.
+
+        Returns:
+            CommandExecutionResult with execution details
+        Raises:
+            CommandExecutorError with details of encountered error
+        """
+        if not isinstance(self, CommandExecutor):
+            raise TypeError(
+                "Decorator 'ensure_pebble_exec' can only wrap methods of CommandExecutor"
+            )
+
+        if not self._container.can_connect():
+            raise CommandExecutionError("Cannot connect to workload container")
+
+        try:
+            logger.info(f"Starting command for {func.__name__}")
+
+            process = func(self, *args, **kwargs)
+
+            logger.info(f"Executing {' '.join(process._command)} command")
+
+            stdout, stderr = process.wait_output()
+
+            logger.info(f"'{' '.join(process._command)}' completed successfully")
+
+            return CommandExecutionResult(
+                success=True,
+                stdout=stdout or "",
+                stderr=stderr or "",
+                return_code=0,
+            )
+        except ops.pebble.ExecError as e:
+            logger.error(
+                f"'{' '.join(e.command)}' failed with exit code {e.exit_code}: {e.stderr}"
+            )
+            return CommandExecutionResult(
+                success=False,
+                stdout=e.stdout or "",
+                stderr=e.stderr or "",
+                return_code=e.exit_code,
+            )
+        except Exception as e:
+            logger.error(f"Unexpected error executing command: {e}")
+            raise CommandExecutionError(f"Failed to execute command with error: {e}") from e
+
+    return wrapper
+
+
 class CommandExecutor:
     """Handles command execution in the workload container."""
 
@@ -41,44 +97,74 @@ class CommandExecutor:
         """
         self._container = container
 
-    def run_db_migrate(self) -> CommandExecutionResult:
-        """Execute the 'airflow db migrate' command.
+    @execute_pebble_exec_process
+    def run_db_migrate(self) -> ops.pebble.ExecProcess:
+        """Execute the 'airflow db migrate' command."""
+        return self._container.exec(
+            ["airflow", "db", "migrate"],
+            environment={
+                "AIRFLOW_HOME": "/opt/airflow",
+            },
+        )
 
-        Returns:
-            CommandExecutionResult with execution details.
+    @execute_pebble_exec_process
+    def add_airflow_s3_connection(
+        self,
+        connection_id: str,
+        access_key_id: str,
+        secret_access_key: str,
+        region: typing.Optional[str] = None,
+        endpoint: typing.Optional[str] = None,
+        tls_ca_chain: typing.Optional[str] = None,
+    ) -> ops.pebble.ExecProcess:
+        """Add/update Airflow S3 connection.
 
-        Raises:
-            CommandExecutionError: If unable to connect to the container.
+        The 'airflow connections add' creates or updates an existing connection.
         """
-        if not self._container.can_connect():
-            raise CommandExecutionError("Cannot connect to workload container")
+        extras = {}
 
-        logger.info("Executing 'airflow db migrate' command")
+        if region:
+            extras["region_name"] = region
 
-        try:
-            process = self._container.exec(
-                ["airflow", "db", "migrate"],
-                environment={
-                    "AIRFLOW_HOME": "/opt/airflow",
-                },
-            )
-            stdout, stderr = process.wait_output()
+        if endpoint:
+            extras["endpoint_url"] = endpoint
 
-            logger.info("'airflow db migrate' completed successfully")
-            return CommandExecutionResult(
-                success=True,
-                stdout=stdout or "",
-                stderr=stderr or "",
-                return_code=0,
-            )
-        except ops.pebble.ExecError as e:
-            logger.error(f"'airflow db migrate' failed with exit code {e.exit_code}: {e.stderr}")
-            return CommandExecutionResult(
-                success=False,
-                stdout=e.stdout or "",
-                stderr=e.stderr or "",
-                return_code=e.exit_code,
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error executing 'airflow db migrate': {e}")
-            raise CommandExecutionError(f"Failed to execute 'airflow db migrate': {e}") from e
+        if tls_ca_chain:
+            tls_ca_path = f"/opt/airflow/connection_certs/{connection_id}.pem"
+            try:
+                # TODO: ensure owned by user+group running airflow
+                self._container.push(
+                    path=tls_ca_path,
+                    source=tls_ca_chain,
+                    make_dirs=True,
+                )
+            except ops.pebble.PathError as e:
+                logger.error(f"Unexpected error pushing TLS CA chain: {e}")
+                raise CommandExecutionError(f"Failed to push TLS CA chain: {e}") from e
+
+            extras["verify"] = tls_ca_path
+
+        extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
+
+        return self._container.exec(
+            [
+                "airflow",
+                "connections",
+                "add",
+                connection_id,
+                "--conn-type",
+                "aws",
+                "--conn-login",
+                access_key_id,
+                "--conn-password",
+                secret_access_key,
+                *extras_options,
+            ],
+        )
+
+    @execute_pebble_exec_process
+    def delete_airflow_connection(self, connection_id: str) -> CommandExecutionResult:
+        """Delete Airflow S3 connection."""
+        return self._container.exec(
+            ["airflow", "connections", "delete", "--conn-id", connection_id],
+        )

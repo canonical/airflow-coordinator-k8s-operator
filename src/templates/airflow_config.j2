@@ -8,3 +8,8 @@ sql_alchemy_conn = {{ sql_alchemy_connection_string }}
 [api]
 base_url = {{ api_server_base_url }}
 port = {{ api_server_port }}
+
+{% if dag_bundles %}
+[dag_processor]
+dag_bundle_config_list = {{ dag_bundles|tojson(indent=4) }}
+{% endif %}
