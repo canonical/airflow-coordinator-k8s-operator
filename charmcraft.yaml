@@ -58,7 +58,7 @@ requires:
     limit: 1
   airflow-api-server:
     interface: airflow_api_server
-  airflow-executor-config:
+  airflow-kubernetes-executor-config:
     interface: airflow_kubernetes_executor
     limit: 1
 

@@ -5,7 +5,7 @@
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
-AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-executor-config"
+AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
