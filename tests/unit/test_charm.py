@@ -17,7 +17,6 @@ import command_executor
 import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
 
-
 MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS = """[core]
 executor = {{ executor | default('LocalExecutor') }}
 fernet_key = {{ core__fernet_key }}
@@ -562,14 +561,20 @@ class TestKubernetesExecutorConfig:
         self, context, state, mock_command_executor
     ):
         """Verify executor config sections are merged into the distributed config template."""
-        with unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+        with (
+            unittest.mock.patch(
+                "config_generator.AirflowConfigGenerator.config_template",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+                ),
             ),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
-            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_config",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG
+                ),
+            ),
         ):
             state_out = context.run(context.on.start(), state)
 
@@ -595,18 +600,26 @@ class TestKubernetesExecutorConfig:
         self, context, state, mock_command_executor
     ):
         """Verify the pod spec template is distributed to core charms."""
-        with unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+        with (
+            unittest.mock.patch(
+                "config_generator.AirflowConfigGenerator.config_template",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+                ),
             ),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
-            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_pod_spec",
-            new_callable=unittest.mock.PropertyMock(
-                return_value=MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_config",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG
+                ),
+            ),
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_pod_spec",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+                ),
             ),
         ):
             state_out = context.run(context.on.start(), state)

@@ -20,6 +20,7 @@ K8S_EXECUTOR_POD_SPEC_PATH = "/k8s_executor_pod_spec"
 WORKLOAD_USER = "ubuntu"
 WORKLOAD_GROUP = "ubuntu"
 
+
 class MockCoreCharmCharm(ops.CharmBase):
     """Charm that indicates the state of relation with Airflow Coordinator."""
 
