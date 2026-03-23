@@ -5,6 +5,7 @@
 
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
+AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -13,6 +14,9 @@ AIRFLOW_DATABASE_NAME = "airflow"
 
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
 AIRFLOW_CONFIG_PATH = "/opt/airflow/airflow.cfg"
+
+WORKLOAD_USER = "ubuntu"
+WORKLOAD_GROUP = "ubuntu"
 
 MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
 WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
@@ -31,3 +35,6 @@ AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
 
 AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow keys"
 AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
+WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
+    "Waiting for configuration from the kubernetes executor charm"
+)

@@ -129,6 +129,28 @@ def airflow_api_server_requires_relation():
     )
 
 
+MOCK_KUBERNETES_EXECUTOR_CONFIG = {
+    "core": {
+        "executor": "KubernetesExecutor",
+    },
+    "kubernetes_executor": {
+        "namespace": "airflow-ns",
+        "pod_template_file": "/opt/airflow/pod_templates/worker_pod_template.yaml",
+        "base_image": "airflow:latest",
+    },
+}
+
+MOCK_KUBERNETES_EXECUTOR_POD_SPEC = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: worker"
+
+
+@pytest.fixture(scope="function")
+def kubernetes_executor_config_relation_empty():
+    return ops.testing.Relation(
+        constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME,
+        remote_app_data={},
+    )
+
+
 @pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,

@@ -169,6 +169,10 @@ def test_relate_and_config_validation(juju: jubilant.Juju):
     _initial_airflow_keys["api__secret_key"] = sensitive["api__secret_key"]
     _initial_airflow_keys["api_auth__jwt_secret"] = sensitive["api_auth__jwt_secret"]
     _initial_airflow_keys["core__fernet_key"] = sensitive["core__fernet_key"]
+    assert (
+        "postgresql+psycopg2://"
+        in json.loads(all_sensitive_data[0])["database__sql_alchemy_conn"]
+    )
 
 
 def test_remove_and_recreate_integrations(juju: jubilant.Juju):
