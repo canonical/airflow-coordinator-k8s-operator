@@ -1,15 +1,6 @@
 [core]
-executor = LocalExecutor
+executor = {{ executor | default('LocalExecutor') }}
 load_examples = False
 
 [database]
-sql_alchemy_conn = {{ sql_alchemy_connection_string }}
-
-[api]
-base_url = {{ api_server_base_url }}
-port = {{ api_server_port }}
-
-{% if dag_bundles %}
-[dag_processor]
-dag_bundle_config_list = {{ dag_bundles|tojson(indent=4) }}
-{% endif %}
+{% if render_sensitive_data %}sql_alchemy_conn = {{ database__sql_alchemy_conn }}{% endif %}

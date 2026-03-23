@@ -9,6 +9,7 @@ import ops.pebble
 import pytest
 
 import command_executor
+import constants
 
 
 @pytest.fixture
@@ -43,6 +44,8 @@ class TestCommandExecutor:
             environment={
                 "AIRFLOW_HOME": "/opt/airflow",
             },
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )
 
     def test_run_db_migrate_not_connected(self, executor, mock_container):

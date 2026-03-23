@@ -10,6 +10,8 @@ import typing
 
 import ops
 
+import constants
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,6 +107,8 @@ class CommandExecutor:
             environment={
                 "AIRFLOW_HOME": "/opt/airflow",
             },
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )
 
     @execute_pebble_exec_process

@@ -6,6 +6,7 @@
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
 S3_ENDPOINT_NAME = "s3"
+AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -14,6 +15,9 @@ AIRFLOW_DATABASE_NAME = "airflow"
 
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
 AIRFLOW_CONFIG_PATH = "/opt/airflow/airflow.cfg"
+
+WORKLOAD_USER = "ubuntu"
+WORKLOAD_GROUP = "ubuntu"
 
 MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
 WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
@@ -27,3 +31,6 @@ MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow v
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
 INVALID_S3_RELATIONS_MESSAGE_TEMPLATE = "Invalid S3 relations: {relation_ids}"
+WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
+    "Waiting for configuration from the kubernetes executor charm"
+)

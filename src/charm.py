@@ -80,8 +80,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         )
         self._s3_requires = s3.S3Requirer(self, constants.S3_ENDPOINT_NAME)
 
+        self._kubernetes_executor_requires = airflow_coordinator.AirflowCoordinatorRequires(
+            self,
+            constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME,
+            callback=self._reconcile,
+        )
+
         for event in [
             self.on.start,
+            self.on.config_changed,
             self.on.update_status,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
@@ -89,11 +96,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
             self._s3_requires.on.credentials_changed,
             self._s3_requires.on.credentials_gone,
+            self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 
     @property
-    def _all_database_connection_details_present(self) -> None:
+    def _all_database_connection_details_present(self) -> bool:
         """Confirm if all database connection details present in postgres relation."""
         if not self._database_requires.relations:
             return False
@@ -215,13 +223,51 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _required_dependencies_exist(self) -> bool:
         """Returns whether all required dependencies for the coordinator exist."""
-        # TODO: add k8s executor configurator relation here too
         return all(
             [
                 self.model.get_relation(constants.POSTGRES_RELATION_NAME),
                 self.model.get_relation(constants.AIRFLOW_API_SERVER_ENDPOINT_NAME),
             ]
         )
+
+    @property
+    def _kubernetes_executor_config(self) -> dict | None:
+        """Return the parsed executor config dict from the executor relation.
+
+        The executor stores its config as a JSON-serialised dict in the
+        ``config_template`` field of the relation databag.
+
+        Returns None when the executor relation is not established or
+        the executor has not yet shared its configuration.
+        """
+        if not self.model.get_relation(constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME):
+            return None
+        content = self._kubernetes_executor_requires.provider_content
+        if not content or not content.config_template:
+            logger.warning(constants.WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE)
+            return None
+        if isinstance(content.config_template, dict):
+            return content.config_template
+        try:
+            return json.loads(content.config_template)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(constants.WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE)
+            return None
+
+    @property
+    def _kubernetes_executor_pod_spec(self) -> str | None:
+        """Return the rendered pod spec template from the K8s executor relation.
+
+        Returns None when the executor relation is not established or
+        the executor has not yet shared its pod spec.
+        """
+        if not self.model.get_relation(constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME):
+            return None
+        content = self._kubernetes_executor_requires.provider_content
+        if not content or not content.kubernetes_executor_pod_spec:
+            logger.warning(constants.WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE)
+            return None
+        return content.kubernetes_executor_pod_spec
 
     def _perform_checks(self) -> None:  # noqa: C901
         """Checks to ensure the charm is able to generate and distribute configs."""
@@ -357,8 +403,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         airflow_coordinator.write_airflow_config(
             self._container,
             constants.AIRFLOW_CONFIG_PATH,
-            self._config_generator.config_template,
-            self._config_generator.sensitive_config_values,
+            self._config_generator.config_template_with_extra_config(
+                **self._config_generator.api_server_config,
+            ),
+            {
+                **self._config_generator.sensitive_config_values,
+                "render_sensitive_data": True,
+            },
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )
 
     def _run_db_migrate(self) -> None:
@@ -387,9 +440,20 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 self._run_db_migrate()
                 self._db_migration_ran = True
 
+            # We can decide which extra config we want to pass to the config_generator
+            # Right now we only have one extra, but in the future we can make decisions
+            # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
-                self._config_generator.config_template,
-                sensitive_data=self._config_generator.sensitive_config_values,
+                self._config_generator.config_template_with_extra_config(
+                    **self._config_generator.api_server_config,
+                    **self._config_generator.dag_processor_config,
+                    **(self._kubernetes_executor_config or {}),
+                ),
+                k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
+                sensitive_data={
+                    **self._config_generator.sensitive_config_values,
+                    "render_sensitive_data": True,
+                },
             )
         except ExceptionWithStatusError as e:
             logger.error(e)
