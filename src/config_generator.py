@@ -95,8 +95,8 @@ class AirflowConfigGenerator:
         port = self._charm._api_server_requires.api_server_port
         return {
             "api": {
-                "api__base_url": f"http://{host}:{port}",
-                "api__port": str(port),
+                "base_url": f"http://{host}:{port}",
+                "port": str(port),
             },
         }
 
