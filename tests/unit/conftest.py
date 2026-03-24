@@ -163,7 +163,7 @@ S3_INTEGRATOR_DATA = {
     "path": "test-path",
     "endpoint": "test-endpoint",
     "region": "test-region",
-    "tls-ca-chain": "test-ca-chain",
+    "tls-ca-chain": "test-ca-chain1,test-ca-chain2",
 }
 
 
@@ -172,6 +172,17 @@ def s3_integrator_relation():
     return ops.testing.Relation(
         constants.S3_ENDPOINT_NAME,
         remote_app_data=S3_INTEGRATOR_DATA,
+    )
+
+
+@pytest.fixture(scope="function")
+def s3_integrator_relation2():
+    return ops.testing.Relation(
+        constants.S3_ENDPOINT_NAME,
+        remote_app_data={
+            **S3_INTEGRATOR_DATA,
+            "bucket": "test-bucket2",
+        },
     )
 
 
@@ -185,6 +196,7 @@ def all_required_relations(
     peer_relation,
     airflow_api_server_requires_relation,
     s3_integrator_relation,
+    s3_integrator_relation2,
 ):
     return [
         postgres_relation,
@@ -195,6 +207,7 @@ def all_required_relations(
         peer_relation,
         airflow_api_server_requires_relation,
         s3_integrator_relation,
+        s3_integrator_relation2,
     ]
 
 

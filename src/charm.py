@@ -184,12 +184,21 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self._s3_requires.relations:
             return {}
 
+        # valid relations include:
+        # - empty databags (waiting for relation data)
+        # - relation data that contains bucket, access-key and secret-key
         return {
             relation.id: connection_info
             for relation in self._s3_requires.relations
             if relation
-            and (connection_info := self._s3_requires.get_storage_connection_info(relation))
-            and all(key in connection_info for key in ["bucket", "access-key", "secret-key"])
+            and (
+                (connection_info := self._s3_requires.get_storage_connection_info(relation))
+                or connection_info == {}
+            )
+            and (
+                not connection_info
+                or all(key in connection_info for key in ["bucket", "access-key", "secret-key"])
+            )
         }
 
     def _required_dependencies_exist(self) -> bool:
@@ -327,6 +336,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         airflow_connections_to_update = {}
 
         for relation_id, connection_info in s3_connections.items():
+            if not connection_info:
+                continue
+
             connection_id = f"s3_relation_{relation_id}_connection"
 
             existing_connection_info = self._airflow_connection_ids.get(connection_id, {})
@@ -351,8 +363,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             connection_id_pattern = r"([\w_]+)_relation_(\d+)_connection"
             match = re.match(connection_id_pattern, airflow_connection_id)
 
-            # TODO also ensure relation_id not in git connections
-            if int(match.group(2)) not in self.s3_connections:
+            relation_id = int(match.group(2))
+
+            # TODO also ensure relation_id false-y in git connections
+
+            if not self.s3_connections.get(relation_id):
                 logger.info(f"Deleting Airflow connection {airflow_connection_id}")
 
                 self._command_executor.delete_airflow_connection(airflow_connection_id)

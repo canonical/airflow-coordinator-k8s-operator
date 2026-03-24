@@ -118,6 +118,7 @@ class AirflowConfigGenerator:
                 },
             }
             for relation_id, connection_info in self._charm.s3_connections.items()
+            if connection_info
         ]
 
         if not s3_dag_bundles:

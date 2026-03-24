@@ -276,39 +276,6 @@ def test_invalid_core_charm_workload_image_hash(
         assert relation.local_app_data == {"validation-failures": failures}
 
 
-def test_invalid_data_from_s3_integrators(
-    context,
-    state,
-    all_required_relations,
-    s3_integrator_relation,
-):
-    """Verify charm going into BlockedStatus if related s3-integrator data invalid."""
-    invalid_s3_relation_data = copy.deepcopy(S3_INTEGRATOR_DATA)
-    invalid_s3_relation_data.pop("bucket")
-
-    invalid_s3_relation = dataclasses.replace(
-        s3_integrator_relation,
-        remote_app_data=invalid_s3_relation_data,
-    )
-
-    relations_with_invalid_s3 = [
-        relation
-        for relation in all_required_relations
-        if relation.endpoint != constants.S3_ENDPOINT_NAME
-    ]
-    relations_with_invalid_s3.append(invalid_s3_relation)
-
-    state = dataclasses.replace(state, relations=relations_with_invalid_s3)
-
-    state_out = context.run(context.on.start(), state)
-
-    assert state_out.unit_status == ops.BlockedStatus(
-        constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
-            relation_ids=str(s3_integrator_relation.id)
-        )
-    )
-
-
 def test_db_migration_does_not_run_on_state_true(
     context,
     all_required_relations,
@@ -391,6 +358,146 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):
         assert "config-template" not in relation.local_app_data
+
+
+class TestS3DagBundles:
+    def test_invalid_data_from_s3_integrators(
+        self,
+        context,
+        state,
+        all_required_relations,
+        s3_integrator_relation,
+    ):
+        """Charm goes into BlockedStatus if related s3-integrator data invalid."""
+        invalid_s3_relation_data = copy.deepcopy(S3_INTEGRATOR_DATA)
+        invalid_s3_relation_data.pop("bucket")
+
+        invalid_s3_relation = dataclasses.replace(
+            s3_integrator_relation,
+            remote_app_data=invalid_s3_relation_data,
+        )
+
+        relations_with_invalid_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_invalid_s3.append(invalid_s3_relation)
+
+        state = dataclasses.replace(state, relations=relations_with_invalid_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
+                relation_ids=str(s3_integrator_relation.id)
+            )
+        )
+
+    def test_empty_s3_relation_succeeds(
+        self, context, state, all_required_relations, s3_integrator_relation_empty
+    ):
+        """An empty s3 relation is skipped from DAG bundles until data is ready."""
+        relations_with_empty_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_empty_s3.append(s3_integrator_relation_empty)
+
+        state = dataclasses.replace(state, relations=relations_with_empty_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_valid_s3_relations_succeed(
+        self, context, state, s3_integrator_relation, s3_integrator_relation2
+    ):
+        """Valid DAG bundles configured when multiple related s3-integrators."""
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{relation_id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                            "bucket_name": connection_info["bucket"],
+                            "prefix": connection_info["path"],
+                        },
+                    }
+                    for relation_id, connection_info in {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                    }.items()
+                ]
+            )
+
+    def test_valid_s3_relations_non_leader(self, context, state):
+        """Non-leader coordiantor units no-op."""
+        state = dataclasses.replace(state, leader=False)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == state.unit_status
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_no_s3_relations(self, context, state, all_required_relations):
+        """Lack of S3 integrators valid (S3 integrator relations are optional)."""
+        relations_without_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        state = dataclasses.replace(state, relations=relations_without_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
 
 
 class TestKubernetesExecutorConfig:
