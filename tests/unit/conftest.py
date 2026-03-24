@@ -152,6 +152,30 @@ def kubernetes_executor_config_relation_empty():
 
 
 @pytest.fixture(scope="function")
+def s3_integrator_relation_empty():
+    return ops.testing.Relation(constants.S3_ENDPOINT_NAME, remote_app_data={})
+
+
+S3_INTEGRATOR_DATA = {
+    "bucket": "test-bucket",
+    "access-key": "test-access-key",
+    "secret-key": "test-secret-key",
+    "path": "test-path",
+    "endpoint": "test-endpoint",
+    "region": "test-region",
+    "tls-ca-chain": "test-ca-chain",
+}
+
+
+@pytest.fixture(scope="function")
+def s3_integrator_relation():
+    return ops.testing.Relation(
+        constants.S3_ENDPOINT_NAME,
+        remote_app_data=S3_INTEGRATOR_DATA,
+    )
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,
     api_server_relation,
@@ -160,6 +184,7 @@ def all_required_relations(
     dag_processor_relation,
     peer_relation,
     airflow_api_server_requires_relation,
+    s3_integrator_relation,
 ):
     return [
         postgres_relation,
@@ -169,6 +194,7 @@ def all_required_relations(
         dag_processor_relation,
         peer_relation,
         airflow_api_server_requires_relation,
+        s3_integrator_relation,
     ]
 
 

@@ -55,15 +55,15 @@ def execute_pebble_exec_process(func: typing.Callable):
             raise CommandExecutionError("Cannot connect to workload container")
 
         try:
-            logger.info(f"Starting command for {func.__name__}")
+            logger.debug(f"Starting command for {func.__name__}")
 
             process = func(self, *args, **kwargs)
 
-            logger.info(f"Executing {' '.join(process._command)} command")
+            logger.debug(f"Executing {' '.join(process._command)} command")
 
             stdout, stderr = process.wait_output()
 
-            logger.info(f"'{' '.join(process._command)}' completed successfully")
+            logger.debug(f"'{' '.join(process._command)}' completed successfully")
 
             return CommandExecutionResult(
                 success=True,
@@ -119,7 +119,7 @@ class CommandExecutor:
         secret_access_key: str,
         region: typing.Optional[str] = None,
         endpoint: typing.Optional[str] = None,
-        tls_ca_chain: typing.Optional[str] = None,
+        tls_ca_chain: list[str] = None,
     ) -> ops.pebble.ExecProcess:
         """Add/update Airflow S3 connection.
 
@@ -136,11 +136,12 @@ class CommandExecutor:
         if tls_ca_chain:
             tls_ca_path = f"/opt/airflow/connection_certs/{connection_id}.pem"
             try:
-                # TODO: ensure owned by user+group running airflow
                 self._container.push(
                     path=tls_ca_path,
-                    source=tls_ca_chain,
+                    source="\n".join(tls_ca_chain),
                     make_dirs=True,
+                    user=constants.WORKLOAD_USER,
+                    group=constants.WORKLOAD_USER,
                 )
             except ops.pebble.PathError as e:
                 logger.error(f"Unexpected error pushing TLS CA chain: {e}")
@@ -150,6 +151,7 @@ class CommandExecutor:
 
         extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
 
+        # airflow connections add also updates existing connections
         return self._container.exec(
             [
                 "airflow",
@@ -164,6 +166,8 @@ class CommandExecutor:
                 secret_access_key,
                 *extras_options,
             ],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )
 
     @execute_pebble_exec_process
@@ -171,4 +175,6 @@ class CommandExecutor:
         """Delete Airflow S3 connection."""
         return self._container.exec(
             ["airflow", "connections", "delete", "--conn-id", connection_id],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
         )

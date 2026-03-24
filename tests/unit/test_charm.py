@@ -4,6 +4,7 @@
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
 import configparser
+import copy
 import dataclasses
 import json
 import unittest.mock
@@ -11,7 +12,11 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
 import ops.testing
-from conftest import MOCK_KUBERNETES_EXECUTOR_CONFIG, MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+from conftest import (
+    MOCK_KUBERNETES_EXECUTOR_CONFIG,
+    MOCK_KUBERNETES_EXECUTOR_POD_SPEC,
+    S3_INTEGRATOR_DATA,
+)
 
 import command_executor
 import constants
@@ -271,6 +276,39 @@ def test_invalid_core_charm_workload_image_hash(
         assert relation.local_app_data == {"validation-failures": failures}
 
 
+def test_invalid_data_from_s3_integrators(
+    context,
+    state,
+    all_required_relations,
+    s3_integrator_relation,
+):
+    """Verify charm going into BlockedStatus if related s3-integrator data invalid."""
+    invalid_s3_relation_data = copy.deepcopy(S3_INTEGRATOR_DATA)
+    invalid_s3_relation_data.pop("bucket")
+
+    invalid_s3_relation = dataclasses.replace(
+        s3_integrator_relation,
+        remote_app_data=invalid_s3_relation_data,
+    )
+
+    relations_with_invalid_s3 = [
+        relation
+        for relation in all_required_relations
+        if relation.endpoint != constants.S3_ENDPOINT_NAME
+    ]
+    relations_with_invalid_s3.append(invalid_s3_relation)
+
+    state = dataclasses.replace(state, relations=relations_with_invalid_s3)
+
+    state_out = context.run(context.on.start(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
+            relation_ids=str(s3_integrator_relation.id)
+        )
+    )
+
+
 def test_db_migration_does_not_run_on_state_true(
     context,
     all_required_relations,
@@ -388,14 +426,20 @@ class TestKubernetesExecutorConfig:
         self, context, state, mock_command_executor
     ):
         """Verify executor config sections are merged into the distributed config template."""
-        with unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+        with (
+            unittest.mock.patch(
+                "config_generator.AirflowConfigGenerator.config_template",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+                ),
             ),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
-            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_config",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG
+                ),
+            ),
         ):
             state_out = context.run(context.on.start(), state)
 
@@ -421,18 +465,26 @@ class TestKubernetesExecutorConfig:
         self, context, state, mock_command_executor
     ):
         """Verify the pod spec template is distributed to core charms."""
-        with unittest.mock.patch(
-            "config_generator.AirflowConfigGenerator.config_template",
-            new_callable=unittest.mock.PropertyMock(
-                return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+        with (
+            unittest.mock.patch(
+                "config_generator.AirflowConfigGenerator.config_template",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
+                ),
             ),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_config",
-            new_callable=unittest.mock.PropertyMock(return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG),
-        ), unittest.mock.patch.object(
-            AirflowCoordinatorK8SOperatorCharm, "_kubernetes_executor_pod_spec",
-            new_callable=unittest.mock.PropertyMock(
-                return_value=MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_config",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_CONFIG
+                ),
+            ),
+            unittest.mock.patch.object(
+                AirflowCoordinatorK8SOperatorCharm,
+                "_kubernetes_executor_pod_spec",
+                new_callable=unittest.mock.PropertyMock(
+                    return_value=MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+                ),
             ),
         ):
             state_out = context.run(context.on.start(), state)

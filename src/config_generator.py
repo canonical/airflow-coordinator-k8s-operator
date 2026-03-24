@@ -5,6 +5,7 @@
 
 import configparser
 import io
+import json
 import logging
 import pathlib
 
@@ -112,8 +113,8 @@ class AirflowConfigGenerator:
                 "classpath": "airflow.providers.amazon.aws.bundles.s3",
                 "kwargs": {
                     "aws_conn_id": f"s3_relation_{relation_id}_connection",
-                    "bucket_name": connection_info.bucket,
-                    "prefix": connection_info.path,
+                    "bucket_name": connection_info["bucket"],
+                    "prefix": connection_info["path"],
                 },
             }
             for relation_id, connection_info in self._charm.s3_connections.items()
@@ -124,7 +125,7 @@ class AirflowConfigGenerator:
 
         return {
             "dag_processor": {
-                "dag_bundle_config_list": s3_dag_bundles
+                "dag_bundle_config_list": json.dumps(s3_dag_bundles),
             },
         }
 
