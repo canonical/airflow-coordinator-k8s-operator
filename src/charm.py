@@ -9,12 +9,14 @@ import functools
 import json
 import logging
 import re
+import secrets
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import object_storage
 import ops
+from cryptography.fernet import Fernet
 from ops.pebble import LayerDict
 
 import command_executor
@@ -145,15 +147,66 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return peer_relation
 
     @property
+    def peer_application_data(self) -> ops.RelationDataContent:
+        """Return the application databag of the peer relation."""
+        return self._peer_relation.data[self.app]
+
+    def _generate_keys_secret_content(self) -> dict[str, str]:
+        """Generate the content for the airflow keys secret."""
+        return {
+            "secret-key": secrets.token_hex(32),
+            "jwt-secret": secrets.token_hex(32),
+            "fernet-key": Fernet.generate_key().decode(),
+        }
+
+    def _ensure_airflow_keys_generated(self) -> None:
+        """Ensure the Juju application secret holding airflow keys exists.
+
+        Creates the secret on first call and stores the secret ID in the
+        peer relation databag.  Subsequent calls are a no-op.
+        """
+        if self.peer_application_data.get(constants.AIRFLOW_KEYS_SECRET):
+            return
+
+        try:
+            content = self._generate_keys_secret_content()
+            keys_secret = self.app.add_secret(content, label=constants.AIRFLOW_KEYS_SECRET_LABEL)
+            if not keys_secret.id:
+                raise ValueError("Secret created without an ID")
+            self.peer_application_data[constants.AIRFLOW_KEYS_SECRET] = keys_secret.id
+        except ValueError:
+            logger.error(constants.AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE)
+            raise ExceptionWithStatusError(
+                constants.AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE, ops.BlockedStatus
+            )
+
+    def get_keys_secret(self) -> ops.Secret:
+        """Retrieve the Juju application secret containing airflow keys."""
+        keys_secret_id = self.peer_application_data.get(constants.AIRFLOW_KEYS_SECRET)
+        if not keys_secret_id:
+            raise ExceptionWithStatusError(
+                constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
+            )
+        try:
+            return self.model.get_secret(
+                id=keys_secret_id, label=constants.AIRFLOW_KEYS_SECRET_LABEL
+            )
+        except (ops.SecretNotFoundError, ops.ModelError):
+            logger.error(constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE)
+            raise ExceptionWithStatusError(
+                constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
+            )
+
+    @property
     def _db_migration_ran(self) -> bool:
         """Check if database migration has been run."""
-        return self._peer_relation.data[self.app].get("db_migration_ran") == "true"
+        return self.peer_application_data.get("db_migration_ran") == "true"
 
     @_db_migration_ran.setter
     def _db_migration_ran(self, value: bool) -> None:
         """Set database migration state."""
         # We need to cast the bool to str, Juju relation data bags can only store strings
-        self._peer_relation.data[self.app]["db_migration_ran"] = str(value).lower()
+        self.peer_application_data["db_migration_ran"] = str(value).lower()
 
     @functools.cached_property
     def _airflow_connection_ids(self) -> dict[str, str]:
@@ -164,7 +217,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 super().__init__(*args, **kwargs)
 
                 for key, value in json.loads(
-                    self._peer_relation.data[self.app].get("airflow_connection_ids", "{}")
+                    self.peer_application_data.get("airflow_connection_ids", "{}")
                 ).items():
                     cls.data[key] = value
 
@@ -174,7 +227,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 else:
                     cls.data[key] = value
 
-                self._peer_relation.data[self.app]["airflow_connection_ids"] = json.dumps(cls.data)
+                self.peer_application_data["airflow_connection_ids"] = json.dumps(cls.data)
 
         return AirflowConnectionDict()
 
@@ -420,6 +473,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         try:
             self._perform_checks()
+            self._ensure_airflow_keys_generated()
             self._reconcile_dag_bundle_remote_connections()
             self._configure_pebble_layer()
             self._write_airflow_config()
