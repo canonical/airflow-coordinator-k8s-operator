@@ -29,6 +29,12 @@ WAITING_FOR_API_SERVER_HOST_PORT_MESSAGE = "Waiting for host+port information fr
 MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow versions"
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
+
+AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
+AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+
+AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow keys"
+AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
 )

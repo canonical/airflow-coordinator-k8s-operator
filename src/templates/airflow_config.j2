@@ -1,7 +1,13 @@
 [core]
 executor = {{ executor | default('LocalExecutor') }}
 load_examples = False
+fernet_key = {{ core__fernet_key }}
 
 [database]
 {% if render_sensitive_data %}sql_alchemy_conn = {{ database__sql_alchemy_conn }}{% endif %}
 
+[api]
+secret_key = {{ api__secret_key }}
+
+[api_auth]
+jwt_secret = {{ api_auth__jwt_secret }}
