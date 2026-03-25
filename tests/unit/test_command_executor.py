@@ -170,7 +170,6 @@ class TestCommandExecutor:
                 "airflow",
                 "connections",
                 "delete",
-                "--conn-id",
                 "test-connection-id",
             ],
             user=constants.WORKLOAD_USER,

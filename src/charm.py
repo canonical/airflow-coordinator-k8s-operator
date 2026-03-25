@@ -352,9 +352,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     connection_id,
                     connection_info["access-key"],
                     connection_info["secret-key"],
-                    region=connection_info["region"],
-                    endpoint=connection_info["endpoint"],
-                    tls_ca_chain=connection_info["tls-ca-chain"],
+                    region=connection_info.get("region"),
+                    endpoint=connection_info.get("endpoint"),
+                    tls_ca_chain=connection_info.get("tls-ca-chain", []),
                 )
 
                 airflow_connections_to_update[connection_id] = connection_id

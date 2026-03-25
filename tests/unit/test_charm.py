@@ -440,7 +440,7 @@ class TestS3DagBundles:
                 [
                     {
                         "name": f"s3_{relation_id}_dag_bundle",
-                        "classpath": "airflow.providers.amazon.aws.bundles.s3",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
                         "kwargs": {
                             "aws_conn_id": f"s3_relation_{relation_id}_connection",
                             "bucket_name": connection_info["bucket"],

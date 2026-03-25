@@ -174,7 +174,7 @@ class CommandExecutor:
     def delete_airflow_connection(self, connection_id: str) -> CommandExecutionResult:
         """Delete Airflow S3 connection."""
         return self._container.exec(
-            ["airflow", "connections", "delete", "--conn-id", connection_id],
+            ["airflow", "connections", "delete", connection_id],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
         )
