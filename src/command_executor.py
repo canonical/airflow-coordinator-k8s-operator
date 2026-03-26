@@ -141,7 +141,7 @@ class CommandExecutor:
                     source="\n".join(tls_ca_chain),
                     make_dirs=True,
                     user=constants.WORKLOAD_USER,
-                    group=constants.WORKLOAD_USER,
+                    group=constants.WORKLOAD_GROUP,
                 )
             except ops.pebble.PathError as e:
                 logger.error(f"Unexpected error pushing TLS CA chain: {e}")
@@ -171,7 +171,7 @@ class CommandExecutor:
         )
 
     @execute_pebble_exec_process
-    def delete_airflow_connection(self, connection_id: str) -> CommandExecutionResult:
+    def delete_airflow_connection(self, connection_id: str) -> ops.pebble.ExecProcess:
         """Delete Airflow S3 connection."""
         return self._container.exec(
             ["airflow", "connections", "delete", connection_id],

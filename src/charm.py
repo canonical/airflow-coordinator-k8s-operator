@@ -8,7 +8,6 @@ import collections
 import functools
 import json
 import logging
-import re
 import secrets
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
@@ -223,7 +222,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             def __setitem__(cls, key, value):  # noqa: N805
                 if not value:
-                    cls.data.pop(key)
+                    cls.data.pop(key, None)
                 else:
                     cls.data[key] = value
 
@@ -302,7 +301,24 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return None
         return content.kubernetes_executor_pod_spec
 
-    def _perform_checks(self) -> None:  # noqa: C901
+    def _perform_potential_s3_connection_checks(self) -> None:
+        """Checks validity of all present s3 connections."""
+        if self._s3_requires.relations:
+            errorneous_relation_ids = [
+                str(relation.id)
+                for relation in self._s3_requires.relations
+                if relation.id not in self.s3_connections
+            ]
+
+            if errorneous_relation_ids:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
+                        relation_ids=", ".join(errorneous_relation_ids)
+                    ),
+                    ops.BlockedStatus,
+                )
+
+    def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self._container.can_connect():
             raise ExceptionWithStatusError(
@@ -364,39 +380,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
-        if self._s3_requires.relations:
-            errorneous_relation_ids = [
-                str(relation.id)
-                for relation in self._s3_requires.relations
-                if relation.id not in self.s3_connections
-            ]
+        self._perform_potential_s3_connection_checks()
 
-            if errorneous_relation_ids:
-                raise ExceptionWithStatusError(
-                    constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
-                        relation_ids=", ".join(errorneous_relation_ids)
-                    ),
-                    ops.BlockedStatus,
-                )
+    def _create_or_update_s3_connections(self) -> dict[str, str]:
+        """Create or update specified s3 connections.
 
-    def _reconcile_dag_bundle_remote_connections(self) -> None:
-        """Create/delete necessary Airflow connections for DAG bundle remotes."""
-        if not self.unit.is_leader():
-            return
+        Returns: mapping between relation_id and connection_id added
+        """
+        added_connection_ids_for_relations = {}
 
-        s3_connections = self.s3_connections
-
-        airflow_connections_to_update = {}
-
-        for relation_id, connection_info in s3_connections.items():
+        for relation_id, connection_info in self.s3_connections.items():
             if not connection_info:
                 continue
 
             connection_id = f"s3_relation_{relation_id}_connection"
 
-            existing_connection_info = self._airflow_connection_ids.get(connection_id, {})
-
-            if existing_connection_info != connection_info:
+            if self._airflow_connection_ids.get(relation_id, {}) != connection_info:
                 logger.info(
                     f"Connection info for {connection_id} changed. Updating Airflow connection"
                 )
@@ -410,25 +409,40 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     tls_ca_chain=connection_info.get("tls-ca-chain", []),
                 )
 
-                airflow_connections_to_update[connection_id] = connection_id
+                added_connection_ids_for_relations[relation_id] = connection_id
 
-        for airflow_connection_id in self._airflow_connection_ids:
-            connection_id_pattern = r"([\w_]+)_relation_(\d+)_connection"
-            match = re.match(connection_id_pattern, airflow_connection_id)
+        return added_connection_ids_for_relations
 
-            relation_id = int(match.group(2))
+    def _delete_stale_connections(self) -> list[str]:
+        """Delete stale s3 connections.
 
-            # TODO also ensure relation_id false-y in git connections
+        Returns: list of relation ids associated with deleted s3 connections.
+        """
+        relations_for_deleted_connections = []
 
+        for relation_id, airflow_connection_id in self._airflow_connection_ids.items():
             if not self.s3_connections.get(relation_id):
                 logger.info(f"Deleting Airflow connection {airflow_connection_id}")
 
                 self._command_executor.delete_airflow_connection(airflow_connection_id)
 
-                airflow_connections_to_update[airflow_connection_id] = None
+                relations_for_deleted_connections.append(relation_id)
 
-        for airflow_connection_id, new_value in airflow_connections_to_update.items():
-            self._airflow_connection_ids[airflow_connection_id] = new_value
+        return relations_for_deleted_connections
+
+    def _reconcile_dag_bundle_remote_connections(self) -> None:
+        """Create/delete necessary Airflow connections for DAG bundle remotes."""
+        if not self.unit.is_leader():
+            return
+
+        added_s3_connections = self._create_or_update_s3_connections()
+        deleted_s3_connections = self._delete_stale_connections()
+
+        for relation_id, connection_id in added_s3_connections.items():
+            self._airflow_connection_ids[relation_id] = connection_id
+
+        for relation_id in deleted_s3_connections:
+            self._airflow_connection_ids[relation_id] = None
 
     def _configure_pebble_layer(self) -> None:
         """Configure the Pebble layer to disable the default airflow service.

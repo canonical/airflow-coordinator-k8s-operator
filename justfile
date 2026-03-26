@@ -12,11 +12,11 @@ clean-mock-charm-libs:
 
 # Run lint
 lint: (clean-mock-charm-libs)
-	uv tool run tox -e lint
+	uv tool run --python 3.12 tox -e lint
 
 # Run format
 format: (clean-mock-charm-libs)
-	uv tool run tox -e format
+	uv tool run --python 3.12 tox -e format
 
 # Run integration tests
 integration debug="": (clean)
@@ -35,7 +35,7 @@ integration debug="": (clean)
 
 # Run unit tests
 unit:
-	uv tool run tox -e unit
+	uv tool run --python 3.12 tox -e unit
 
 # Clean up test environment
 clean: (clean-mock-charm-libs)
