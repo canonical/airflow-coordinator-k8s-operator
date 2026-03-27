@@ -21,13 +21,14 @@ class AirflowConfigGenerator:
 
     @property
     def _api_server_base_url(self) -> str:
-        """Return the API server base URL, preferring the ingress URL when available."""
-        ingress_url = self._charm._api_server_requires.api_server_ingress_url
-        if ingress_url:
-            return ingress_url
+        """Return the API server base URL, appending the ingress path when available."""
         host = self._charm._api_server_requires.api_server_host
         port = self._charm._api_server_requires.api_server_port
-        return f"http://{host}:{port}"
+        ingress_path = self._charm._api_server_requires.api_server_ingress_path
+        base = f"http://{host}:{port}"
+        if ingress_path:
+            return f"{base}/{ingress_path}"
+        return base
 
     @property
     def config_template(self) -> str:

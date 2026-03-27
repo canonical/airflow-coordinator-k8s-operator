@@ -66,7 +66,7 @@ LIBPATCH = 2
 
 HOST_KEY = "host"
 PORT_KEY = "port"
-INGRESS_URL_KEY = "ingress_url"
+INGRESS_PATH_KEY = "ingress_path"
 
 logger = logging.getLogger(__name__)
 
@@ -105,19 +105,19 @@ class AirflowAPIServerProvides(ops.Object):
         self._relation.data[self._charm.app][HOST_KEY] = host
         self._relation.data[self._charm.app][PORT_KEY] = port
 
-    def set_ingress_url(self, url: str) -> None:
-        """Write the ingress URL to the relation."""
+    def set_ingress_path(self, path: str) -> None:
+        """Write the ingress path prefix to the relation."""
         relation = self._charm.model.get_relation(self._relation_name)
         if not relation or not self._charm.unit.is_leader():
             return
-        relation.data[self._charm.app][INGRESS_URL_KEY] = url
+        relation.data[self._charm.app][INGRESS_PATH_KEY] = path
 
-    def clear_ingress_url(self) -> None:
-        """Remove the ingress URL from the relation."""
+    def clear_ingress_path(self) -> None:
+        """Remove the ingress path prefix from the relation."""
         relation = self._charm.model.get_relation(self._relation_name)
         if not relation or not self._charm.unit.is_leader():
             return
-        relation.data[self._charm.app].pop(INGRESS_URL_KEY, None)
+        relation.data[self._charm.app].pop(INGRESS_PATH_KEY, None)
 
 
 class AirflowAPIServerRequires(ops.Object):
@@ -157,8 +157,8 @@ class AirflowAPIServerRequires(ops.Object):
         return self._relation.data[self._relation.app].get(PORT_KEY)
 
     @property
-    def api_server_ingress_url(self) -> typing.Optional[str]:
-        """Return the API server's external ingress URL if available."""
+    def api_server_ingress_path(self) -> typing.Optional[str]:
+        """Return the API server's ingress path prefix if available."""
         if not self._relation or not self._relation.app:
             return None
-        return self._relation.data[self._relation.app].get(INGRESS_URL_KEY)
+        return self._relation.data[self._relation.app].get(INGRESS_PATH_KEY)

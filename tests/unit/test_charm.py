@@ -645,20 +645,22 @@ class TestKubernetesExecutorConfig:
         for relation in state_out.get_relations("airflow-coordinator"):
             config_template = relation.local_app_data.get("config-template", "")
             assert "executor = KubernetesExecutor" not in config_template
-def test_base_url_uses_ingress_url_when_available(
+
+
+def test_base_url_uses_ingress_path_when_available(
     context,
     all_required_relations,
     airflow_api_server_requires_relation,
     workload_container,
     mock_command_executor,
 ):
-    """Verify base_url uses ingress URL when api-server shares one."""
+    """Verify base_url appends ingress path when api-server shares one."""
     ingress_relation = dataclasses.replace(
         airflow_api_server_requires_relation,
         remote_app_data={
             "host": "test-host",
             "port": "test-port",
-            "ingress_url": "http://10.43.45.0/test-airflow-api-server-k8s",
+            "ingress_path": "test-airflow-api-server-k8s",
         },
     )
     all_required_relations.remove(airflow_api_server_requires_relation)
@@ -675,7 +677,7 @@ def test_base_url_uses_ingress_url_when_available(
 
     for relation in state_out.get_relations("airflow-coordinator"):
         config_template = relation.local_app_data.get("config-template", "")
-        assert "http://10.43.45.0/test-airflow-api-server-k8s" in config_template
+        assert "http://test-host:test-port/test-airflow-api-server-k8s" in config_template
 
 
 def test_base_url_falls_back_to_internal_url_without_ingress(
@@ -683,7 +685,7 @@ def test_base_url_falls_back_to_internal_url_without_ingress(
     state,
     mock_command_executor,
 ):
-    """Verify base_url falls back to internal host:port when no ingress URL."""
+    """Verify base_url uses internal host:port when no ingress path."""
     state_out = context.run(context.on.start(), state)
     assert state_out.unit_status == ops.ActiveStatus()
 
