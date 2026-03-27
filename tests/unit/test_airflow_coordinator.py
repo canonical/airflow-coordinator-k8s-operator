@@ -177,6 +177,12 @@ def valid_relation_data(coordinator_relation_secret):
         "config-template": "test-config: {{ secret }}",
         "kubernetes-executor-pod-spec": "test-pod-spec: {{ secret }}",
         "secret-sensitive-data": coordinator_relation_secret.id,
+        "tls-ca-chains": json.dumps(
+            {
+                "/file1": "chain1",
+                "/file2": "chain2\nchain3",
+            }
+        ),
     }
 
 
@@ -873,6 +879,35 @@ class TestAirflowCoordinatorCoreRequires:
 
             assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
 
+    def test_can_write_tls_ca_chains_blocked_by_mismatched_airflow_version(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        invalid_airflow_version_relation_data,
+    ):
+        relation_mismatched_airflow_versions = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data=invalid_airflow_version_relation_data,
+        )
+        state_mismatched_airflow_versions = dataclasses.replace(
+            application_state, relations=[relation_mismatched_airflow_versions]
+        )
+
+        with application_context(
+            application_context.on.relation_changed(relation_mismatched_airflow_versions),
+            state_mismatched_airflow_versions,
+        ) as manager:
+            manager.run()
+            assert (
+                self.get_juju_log_line(
+                    "INFO", airflow_coordinator.AirflowCoreMetadataValidationFailed
+                )
+                in application_context.juju_log
+            )
+
+            assert not manager.charm.requirer.can_write_tls_ca_chain
+
     def test_can_write_k8s_executor_pod_spec_blocked_when_container_not_connectable(
         self,
         application_context,
@@ -891,6 +926,64 @@ class TestAirflowCoordinatorCoreRequires:
         ) as manager:
             manager.run()
             assert not manager.charm.requirer.can_write_kubernetes_executor_pod_spec
+
+    def test_can_write_tls_ca_chains_container_not_connectable(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        application_workload_container,
+    ):
+        container_not_ready = dataclasses.replace(
+            application_workload_container, can_connect=False
+        )
+        state = dataclasses.replace(application_state, containers=[container_not_ready])
+
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            state,
+        ) as manager:
+            manager.run()
+            assert not manager.charm.requirer.can_write_tls_ca_chain
+
+    def test_write_tls_ca_chains_to_workload_container(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            application_state,
+        ) as manager:
+            state_out = manager.run()
+            assert (
+                self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigAvailableEvent)
+                in application_context.juju_log
+            )
+
+            assert manager.charm.requirer.can_write_tls_ca_chain
+
+            manager.charm.requirer.write_tls_ca_chains(
+                constants.WORKLOAD_USER, constants.WORKLOAD_GROUP
+            )
+
+            filesystem = state_out.get_container("workload-container").get_filesystem(
+                application_context
+            )
+
+            tls_ca_chains_file1 = pathlib.Path(f"{filesystem.absolute()}/file1")
+            tls_ca_chains_file2 = pathlib.Path(f"{filesystem.absolute()}/file2")
+
+            assert tls_ca_chains_file1.exists()
+            assert tls_ca_chains_file1.is_file()
+            assert tls_ca_chains_file1.read_text(encoding="utf-8") == "chain1"
+            assert tls_ca_chains_file1.stat().st_mode & 0o777 == 0o644
+
+            assert tls_ca_chains_file2.exists()
+            assert tls_ca_chains_file2.is_file()
+            assert tls_ca_chains_file2.read_text(encoding="utf-8") == "chain2\nchain3"
+            assert tls_ca_chains_file2.stat().st_mode & 0o777 == 0o644
 
 
 class TestAirflowCoordinatorProvides:
@@ -1068,6 +1161,11 @@ class TestAirflowCoordinatorProvides:
     def test_set_airflow_config(self, coordinator_context):
         state = generate_coordinator_state()
 
+        tls_ca_chains = {
+            "/file1": "chain1",
+            "/file2": "chain2",
+        }
+
         with coordinator_context(
             coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
             state,
@@ -1078,6 +1176,7 @@ class TestAirflowCoordinatorProvides:
                 "sensitive_data": {
                     "secret": "s3cret",
                 },
+                "tls_ca_chains": tls_ca_chains,
             }
 
             assert manager.charm.provider.set_airflow_config(**airflow_config_params) is None
@@ -1108,3 +1207,5 @@ class TestAirflowCoordinatorProvides:
                 assert state_out.get_secret(id=secret_id).latest_content == {
                     "sensitive-data": json.dumps(airflow_config_params["sensitive_data"])
                 }
+
+                assert relation.local_app_data["tls-ca-chains"] == json.dumps(tls_ca_chains)

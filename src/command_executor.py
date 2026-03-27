@@ -134,7 +134,8 @@ class CommandExecutor:
             extras["endpoint_url"] = endpoint
 
         if tls_ca_chain:
-            tls_ca_path = f"/opt/airflow/connection_certs/{connection_id}.pem"
+            tls_ca_path = constants.TLS_CA_CHAIN_FILEPATH_TEMPLATE.format(filename=connection_id)
+
             try:
                 self._container.push(
                     path=tls_ca_path,
@@ -175,6 +176,15 @@ class CommandExecutor:
         """Delete Airflow S3 connection."""
         return self._container.exec(
             ["airflow", "connections", "delete", connection_id],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+        )
+
+    @execute_pebble_exec_process
+    def list_airflow_connections(self) -> ops.pebble.ExecProcess:
+        """List all Airflow connections."""
+        return self._container.exec(
+            ["airflow", "connections", "list", "--output", "json"],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
         )

@@ -14,7 +14,9 @@ POSTGRES_RELATION_NAME = "postgres"
 AIRFLOW_DATABASE_NAME = "airflow"
 
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
-AIRFLOW_CONFIG_PATH = "/opt/airflow/airflow.cfg"
+AIRFLOW_HOME = "/opt/airflow"
+AIRFLOW_CONFIG_PATH = f"{AIRFLOW_HOME}/airflow.cfg"
+TLS_CA_CHAIN_FILEPATH_TEMPLATE = AIRFLOW_HOME + "/connection_certs/{filename}.pem"
 
 WORKLOAD_USER = "ubuntu"
 WORKLOAD_GROUP = "ubuntu"
