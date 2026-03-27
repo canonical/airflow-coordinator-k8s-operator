@@ -8,6 +8,7 @@ import json
 import logging
 import typing
 
+import charms.git_integrator.v0.git as git
 import ops
 
 import constants
@@ -185,6 +186,50 @@ class CommandExecutor:
         """List all Airflow connections."""
         return self._container.exec(
             ["airflow", "connections", "list", "--output", "json"],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+        )
+
+    @execute_pebble_exec_process
+    def add_airflow_git_connection(
+        self,
+        connection_id: str,
+        git_provider_model: git.GitProviderModel,
+    ) -> ops.pebble.ExecProcess:
+        """Add/update Airflow S3 connection.
+
+        The 'airflow connections add' creates or updates an existing connection.
+
+        """
+        extras = {}
+        if git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
+            extras["ssh_key"] = git_provider_model.ssh_private_key
+        extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
+
+        credentials_options = (
+            [
+                "--conn-login",
+                git_provider_model.credentials_username,
+                "--conn-password",
+                git_provider_model.credentials_personal_access_token,
+            ]
+            if git_provider_model.authentication_method == git.AuthenticationMethodEnum.CREDENTIALS
+            else []
+        )
+
+        return self._container.exec(
+            [
+                "airflow",
+                "connections",
+                "add",
+                connection_id,
+                "--conn-type",
+                "git",
+                "--conn-host",
+                git_provider_model.repository_url,
+                *credentials_options,
+                *extras_options,
+            ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
         )

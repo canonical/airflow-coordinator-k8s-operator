@@ -63,6 +63,8 @@ requires:
     limit: 1
   s3:
     interface: s3
+  git:
+    interface: git
 
 peers:
   coordinator-peers:

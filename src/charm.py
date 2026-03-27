@@ -11,6 +11,7 @@ import secrets
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
+import charms.git_integrator.v0.git as git
 import object_storage
 import ops
 from cryptography.fernet import Fernet
@@ -64,6 +65,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             callback=self._reconcile,
         )
         self._s3_requires = object_storage.S3Requirer(self, constants.S3_ENDPOINT_NAME)
+
+        self._git_requires = git.GitRequires(self, constants.GIT_ENDPOINT_NAME, self._reconcile)
 
         self._kubernetes_executor_requires = airflow_coordinator.AirflowCoordinatorRequires(
             self,
@@ -304,6 +307,23 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     ops.BlockedStatus,
                 )
 
+    def _perform_potential_git_connection_checks(self) -> None:
+        """Checks validity of all present git connections."""
+        if self._git_requires.relations:
+            errorneous_relation_ids = [
+                str(relation.id)
+                for relation in self._git_requires.relations
+                if relation.id not in self._git_requires.get_git_connection_information()
+            ]
+
+            if errorneous_relation_ids:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_GIT_RELATIONS_MESSAGE_TEMPLATE.format(
+                        relation_ids=", ".join(errorneous_relation_ids)
+                    ),
+                    ops.BlockedStatus,
+                )
+
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
         if not self._container.can_connect():
@@ -367,6 +387,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             )
 
         self._perform_potential_s3_connection_checks()
+        self._perform_potential_git_connection_checks()
 
     def _create_or_update_s3_connections(self) -> None:
         """Create or update s3 connections that have changed."""
@@ -427,6 +448,89 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     tls_ca_chain=connection_info.get("tls-ca-chain", []),
                 )
 
+    def _create_or_update_git_connections(self) -> None:  # noqa: C901
+        """Create or update git connections that have changed."""
+        airflow_connections = json.loads(
+            self._command_executor.list_airflow_connections().stdout or "{}"
+        )
+
+        def _has_git_connection_changed(
+            connection_id: str, git_provider_model: git.GitProviderModel
+        ) -> bool:
+            """Helper to determine if an git connection's info has changed."""
+            filtered_airflow_connections = list(
+                filter(
+                    lambda connection: connection["conn_id"] == connection_id, airflow_connections
+                )
+            )
+
+            if not filtered_airflow_connections:
+                return True
+
+            airflow_connection = filtered_airflow_connections[0]
+
+            has_authentication_changed = False
+
+            if (
+                git_provider_model.authentication_method
+                == git.AuthenticationMethodEnum.CREDENTIALS
+            ):
+                # Existing airflow connection has SSH parameters
+                if airflow_connection["extra_dejson"].get("ssh_key") or airflow_connection[
+                    "extra_dejson"
+                ].get("strict_host_key_checking"):
+                    has_authentication_changed = True
+
+                # Existing credentials not the same as credentials in relation
+                if (
+                    airflow_connection.get("login") != git_provider_model.credentials_username
+                    or airflow_connection.get("password")
+                    != git_provider_model.credentials_personal_access_token
+                ):
+                    has_authentication_changed = True
+
+            elif git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
+                # Existing airflow connection has credentials
+                if airflow_connection.get("login") or airflow_connection.get("password"):
+                    has_authentication_changed = True
+
+                if (
+                    airflow_connection["extra_dejson"].get("ssh_key")
+                    != git_provider_model.ssh_private_key
+                    or airflow_connection.get["extra_dejson"].get("strict_host_key_checking")
+                    != git_provider_model.ssh_strict_host_key_checking
+                ):
+                    has_authentication_changed = True
+
+            return not (
+                airflow_connection["conn_type"] == "git"
+                and airflow_connection["host"] == git_provider_model.repository_url
+                and airflow_connection["extra_dejson"].get("tracking_ref")
+                == git_provider_model.tracking_ref
+                and airflow_connection["extra_dejson"].get("path") == git_provider_model.path
+                and not has_authentication_changed
+            )
+
+        for (
+            relation_id,
+            git_provider_model,
+        ) in self._git_requires.get_git_connection_information().items():
+            connection_id = f"s3_relation_{relation_id}_connection"
+
+            if _has_git_connection_changed(connection_id, git_provider_model):
+                logger.info(
+                    f"Connection info for {connection_id} changed. Deleting old Airflow connection"
+                )
+
+                self._command_executor.delete_airflow_connection(connection_id)
+
+                logger.info(f"Adding new Airflow connection for {connection_id}")
+
+                self._command_executor.add_airflow_git_connection(
+                    connection_id,
+                    git_provider_model,
+                )
+
     def _delete_stale_connections(self) -> None:
         """Delete stale s3 connections (s3 connections without relations)."""
         airflow_connections = json.loads(
@@ -437,6 +541,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             connection["conn_id"]: connection
             for connection in airflow_connections
             if connection["conn_id"].startswith("s3_relation_")
+        }
+
+        git_airflow_connection_ids = {
+            connection["conn_id"]: connection
+            for connection in airflow_connections
+            if connection["conn_id"].startswith("git_relation_")
         }
 
         for relation_id, connection_info in self.s3_connections.items():
@@ -450,6 +560,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
                 self._command_executor.delete_airflow_connection(connection_id)
 
+        for relation_id in self._git_requires.get_git_connection_information():
+            connection_id = f"git_relation_{relation_id}_connection"
+
+            if not git_airflow_connection_ids.get(connection_id):
+                logger.info(f"Deleting Airflow connection {connection_id}")
+
+                self._command_executor.delete_airflow_connection(connection_id)
+
     def _reconcile_dag_bundle_remote_connections(self) -> None:
         """Create/delete necessary Airflow connections for DAG bundle remotes."""
         if not self.unit.is_leader() or not self._db_migration_ran:
@@ -457,6 +575,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         try:
             self._create_or_update_s3_connections()
+            self._create_or_update_git_connections()
             self._delete_stale_connections()
         except command_executor.CommandExecutionError:
             raise ExceptionWithStatusError(

@@ -447,23 +447,21 @@ class TestS3DagBundles:
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
 
-            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
-                [
-                    {
-                        "name": f"s3_{relation_id}_dag_bundle",
-                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
-                        "kwargs": {
-                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
-                            "bucket_name": connection_info["bucket"],
-                            "prefix": connection_info["path"],
-                        },
-                    }
-                    for relation_id, connection_info in {
-                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
-                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
-                    }.items()
-                ]
-            )
+            assert json.loads(parsed.get("dag_processor", "dag_bundle_config_list")) == [
+                {
+                    "name": f"s3_{relation_id}_dag_bundle",
+                    "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                    "kwargs": {
+                        "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                        "bucket_name": connection_info["bucket"],
+                        "prefix": connection_info["path"],
+                    },
+                }
+                for relation_id, connection_info in {
+                    s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                    s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                }.items()
+            ]
 
     def test_valid_s3_relations_non_leader(self, context, state):
         """Non-leader coordiantor units no-op."""

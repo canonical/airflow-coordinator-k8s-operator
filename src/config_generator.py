@@ -121,12 +121,35 @@ class AirflowConfigGenerator:
             if connection_info
         ]
 
-        if not s3_dag_bundles:
+        git_dag_bundles = [
+            {
+                "name": f"git_{relation_id}_dag_bundle",
+                "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
+                "kwargs": {
+                    key: value
+                    for key, value in {
+                        "tracking_ref": git_provider_model.tracking_ref,
+                        "path": git_provider_model.path,
+                        "strict_host_key_checking": git_provider_model.ssh_strict_host_key_checking,  # noqa: E501
+                    }.items()
+                    if value
+                },
+            }
+            for relation_id, git_provider_model in self._charm._git_requires.get_git_connection_information()  # noqa: E501
+        ]
+
+        if not s3_dag_bundles or git_dag_bundles:
             return {}
 
         return {
             "dag_processor": {
-                "dag_bundle_config_list": json.dumps(s3_dag_bundles),
+                "dag_bundle_config_list": json.dumps(
+                    [
+                        *s3_dag_bundles,
+                        *git_dag_bundles,
+                    ],
+                    indent=4,
+                ),
             },
         }
 
