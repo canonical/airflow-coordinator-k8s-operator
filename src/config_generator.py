@@ -128,17 +128,20 @@ class AirflowConfigGenerator:
                 "kwargs": {
                     key: value
                     for key, value in {
+                        "git_conn_id": f"git_relation_{relation_id}_connection",
+                        "repo_url": git_provider_model.repository_url,
                         "tracking_ref": git_provider_model.tracking_ref,
-                        "path": git_provider_model.path,
-                        "strict_host_key_checking": git_provider_model.ssh_strict_host_key_checking,  # noqa: E501
+                        "subdir": git_provider_model.path,
+                        "submodules": False,
+                        "prune_dotgit_folder": True,
                     }.items()
-                    if value
+                    if value is not None
                 },
             }
-            for relation_id, git_provider_model in self._charm._git_requires.get_git_connection_information()  # noqa: E501
+            for relation_id, git_provider_model in self._charm._git_requires.get_git_connection_information().items()  # noqa: E501
         ]
 
-        if not s3_dag_bundles or git_dag_bundles:
+        if not s3_dag_bundles and not git_dag_bundles:
             return {}
 
         return {

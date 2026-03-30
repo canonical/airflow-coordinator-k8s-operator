@@ -454,6 +454,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._command_executor.list_airflow_connections().stdout or "{}"
         )
 
+        airflow_connection_ids = [connection["conn_id"] for connection in airflow_connections]
+
         def _has_git_connection_changed(
             connection_id: str, git_provider_model: git.GitProviderModel
         ) -> bool:
@@ -515,14 +517,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             relation_id,
             git_provider_model,
         ) in self._git_requires.get_git_connection_information().items():
-            connection_id = f"s3_relation_{relation_id}_connection"
+            connection_id = f"git_relation_{relation_id}_connection"
 
             if _has_git_connection_changed(connection_id, git_provider_model):
                 logger.info(
                     f"Connection info for {connection_id} changed. Deleting old Airflow connection"
                 )
 
-                self._command_executor.delete_airflow_connection(connection_id)
+                if connection_id in airflow_connection_ids:
+                    self._command_executor.delete_airflow_connection(connection_id)
 
                 logger.info(f"Adding new Airflow connection for {connection_id}")
 
@@ -533,40 +536,29 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _delete_stale_connections(self) -> None:
         """Delete stale s3 connections (s3 connections without relations)."""
-        airflow_connections = json.loads(
-            self._command_executor.list_airflow_connections().stdout or "{}"
-        )
+        airflow_connections = [
+            connection["conn_id"]
+            for connection in json.loads(
+                self._command_executor.list_airflow_connections().stdout or "{}"
+            )
+        ]
 
-        s3_airflow_connection_ids = {
-            connection["conn_id"]: connection
-            for connection in airflow_connections
-            if connection["conn_id"].startswith("s3_relation_")
-        }
+        s3_connection_ids = [
+            f"s3_relation_{relation_id}_connection" for relation_id in self.s3_connections
+        ]
+        git_connection_ids = [
+            f"git_relation_{relation_id}_connection"
+            for relation_id in self._git_requires.get_git_connection_information()
+        ]
 
-        git_airflow_connection_ids = {
-            connection["conn_id"]: connection
-            for connection in airflow_connections
-            if connection["conn_id"].startswith("git_relation_")
-        }
+        for airflow_connection_id in airflow_connections:
+            if (
+                airflow_connection_id not in s3_connection_ids
+                and airflow_connection_id not in git_connection_ids
+            ):
+                logger.info(f"Deleting Airflow connection {airflow_connection_id}")
 
-        for relation_id, connection_info in self.s3_connections.items():
-            if not connection_info:
-                continue
-
-            connection_id = f"s3_relation_{relation_id}_connection"
-
-            if not s3_airflow_connection_ids.get(connection_id):
-                logger.info(f"Deleting Airflow connection {connection_id}")
-
-                self._command_executor.delete_airflow_connection(connection_id)
-
-        for relation_id in self._git_requires.get_git_connection_information():
-            connection_id = f"git_relation_{relation_id}_connection"
-
-            if not git_airflow_connection_ids.get(connection_id):
-                logger.info(f"Deleting Airflow connection {connection_id}")
-
-                self._command_executor.delete_airflow_connection(connection_id)
+                self._command_executor.delete_airflow_connection(airflow_connection_id)
 
     def _reconcile_dag_bundle_remote_connections(self) -> None:
         """Create/delete necessary Airflow connections for DAG bundle remotes."""
@@ -602,6 +594,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_CONFIG_PATH,
             self._config_generator.config_template_with_extra_config(
                 **self._config_generator.api_server_config,
+                **self._config_generator.dag_processor_config,
             ),
             {
                 **self._config_generator.sensitive_config_values,
@@ -654,6 +647,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 },
                 tls_ca_chains=self.s3_tls_ca_chains,
             )
+
         except ExceptionWithStatusError as e:
             logger.error(e)
             self.unit.status = e.status
