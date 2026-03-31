@@ -433,22 +433,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._command_executor.list_airflow_connections().stdout or "{}"
         )
 
-        s3_airflow_connection_ids = {
-            connection["conn_id"]: connection
-            for connection in airflow_connections
-            if connection["conn_id"].startswith("s3_relation_")
-        }
+        s3_relation_connection_ids = [
+            f"s3_relation_{relation_id}_connection" for relation_id in self.s3_connections
+        ]
 
-        for relation_id, connection_info in self.s3_connections.items():
-            if not connection_info:
-                continue
+        for airflow_connection_id in [connection["conn_id"] for connection in airflow_connections]:
+            if airflow_connection_id not in s3_relation_connection_ids:
+                logger.info(f"Deleting Airflow connection {airflow_connection_id}")
 
-            connection_id = f"s3_relation_{relation_id}_connection"
-
-            if not s3_airflow_connection_ids.get(connection_id):
-                logger.info(f"Deleting Airflow connection {connection_id}")
-
-                self._command_executor.delete_airflow_connection(connection_id)
+                self._command_executor.delete(airflow_connection_id)
 
     def _reconcile_dag_bundle_remote_connections(self) -> None:
         """Create/delete necessary Airflow connections for DAG bundle remotes."""
