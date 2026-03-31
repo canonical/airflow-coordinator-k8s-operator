@@ -128,7 +128,9 @@ class AirflowConfigGenerator:
                 "kwargs": {
                     key: value
                     for key, value in {
-                        "git_conn_id": f"git_relation_{relation_id}_connection",
+                        "git_conn_id": f"git_relation_{relation_id}_connection"
+                        if git_provider_model.authentication_method is not None
+                        else None,
                         "repo_url": git_provider_model.repository_url,
                         "tracking_ref": git_provider_model.tracking_ref,
                         "subdir": git_provider_model.path,

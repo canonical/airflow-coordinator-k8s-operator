@@ -289,6 +289,7 @@ def test_invalid_core_charm_workload_image_hash(
 
 def test_db_migration_does_not_run_on_state_true(
     context,
+    state,
     all_required_relations,
     mock_run_db_migrate,
     workload_container,
@@ -308,11 +309,7 @@ def test_db_migration_does_not_run_on_state_true(
             return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=relations,
-        )
+        state_in = dataclasses.replace(state, relations=relations)
 
         context.run(
             context.on.pebble_ready(workload_container),
@@ -324,10 +321,9 @@ def test_db_migration_does_not_run_on_state_true(
 
 def test_db_migration_runs_on_state_false(
     context,
-    all_required_relations,
+    state,
     mock_run_db_migrate,
     workload_container,
-    peer_relation,
 ):
     """Verify that database migration happens when peer relation state is False."""
     # Peer relation with no migration state (defaults to False)
@@ -337,15 +333,9 @@ def test_db_migration_runs_on_state_false(
             return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=all_required_relations,
-        )
-
         context.run(
             context.on.pebble_ready(workload_container),
-            state_in,
+            state,
         )
 
     mock_run_db_migrate.assert_called_once()
@@ -371,7 +361,7 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
         assert "config-template" not in relation.local_app_data
 
 
-class TestS3DagBundles:
+class TestDagBundles:
     def test_invalid_data_from_s3_integrators(
         self,
         context,
@@ -413,6 +403,7 @@ class TestS3DagBundles:
             relation
             for relation in all_required_relations
             if relation.endpoint != constants.S3_ENDPOINT_NAME
+            and relation.endpoint != constants.GIT_ENDPOINT_NAME
         ]
         relations_with_empty_s3.append(s3_integrator_relation_empty)
 
@@ -435,10 +426,22 @@ class TestS3DagBundles:
                 pass
 
     def test_valid_s3_relations_succeed(
-        self, context, state, s3_integrator_relation, s3_integrator_relation2
+        self,
+        context,
+        state,
+        all_required_relations,
+        s3_integrator_relation,
+        s3_integrator_relation2,
     ):
         """Valid DAG bundles configured when multiple related s3-integrators."""
-        state_out = context.run(context.on.start(), state)
+        relations_without_git = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.GIT_ENDPOINT_NAME
+        ]
+        state_in = dataclasses.replace(state, relations=relations_without_git)
+
+        state_out = context.run(context.on.start(), state_in)
 
         assert state_out.unit_status == ops.ActiveStatus()
 
@@ -483,14 +486,15 @@ class TestS3DagBundles:
             except (configparser.NoSectionError, configparser.NoOptionError):
                 pass
 
-    def test_no_s3_relations(self, context, state, all_required_relations):
+    def test_no_s3_or_git_relations(self, context, state, all_required_relations):
         """Lack of S3 integrators valid (S3 integrator relations are optional)."""
-        relations_without_s3 = [
+        relations_without_s3_or_git = [
             relation
             for relation in all_required_relations
             if relation.endpoint != constants.S3_ENDPOINT_NAME
+            and relation.endpoint != constants.GIT_ENDPOINT_NAME
         ]
-        state = dataclasses.replace(state, relations=relations_without_s3)
+        state = dataclasses.replace(state, relations=relations_without_s3_or_git)
 
         state_out = context.run(context.on.start(), state)
 
@@ -507,6 +511,121 @@ class TestS3DagBundles:
                 assert False
             except (configparser.NoSectionError, configparser.NoOptionError):
                 pass
+
+    def test_invalid_data_from_git_integrators(
+        self,
+        context,
+        state,
+        all_required_relations,
+        git_unauthenticated_relation,
+    ):
+        """Charm goes into BlockedStatus if related git-integrator data invalid."""
+        invalid_git_relation_data = copy.deepcopy(git_unauthenticated_relation.remote_app_data)
+        invalid_git_relation_data.pop("repository-url")
+
+        invalid_git_relation = dataclasses.replace(
+            git_unauthenticated_relation,
+            remote_app_data=invalid_git_relation_data,
+        )
+
+        relations_with_invalid_git = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.GIT_ENDPOINT_NAME
+        ]
+        relations_with_invalid_git.append(invalid_git_relation)
+
+        state = dataclasses.replace(state, relations=relations_with_invalid_git)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_GIT_RELATIONS_MESSAGE_TEMPLATE.format(
+                relation_ids=str(invalid_git_relation.id)
+            )
+        )
+
+    def test_empty_git_relation_succeeds(
+        self, context, state, all_required_relations, git_integrator_relation_empty
+    ):
+        """An empty git relation is skipped from DAG bundles until data is ready."""
+        relations_with_empty_git = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+            and relation.endpoint != constants.GIT_ENDPOINT_NAME
+        ]
+        relations_with_empty_git.append(git_integrator_relation_empty)
+
+        state = dataclasses.replace(state, relations=relations_with_empty_git)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_valid_git_relations_succeed(
+        self,
+        context,
+        state,
+        all_required_relations,
+        git_unauthenticated_relation,
+        git_credentials_relation,
+        git_ssh_relation,
+    ):
+        """Valid DAG bundles configured when multiple related git-integrators."""
+        relations_without_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        state_in = dataclasses.replace(state, relations=relations_without_s3)
+
+        state_out = context.run(context.on.start(), state_in)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert json.loads(parsed.get("dag_processor", "dag_bundle_config_list")) == [
+                {
+                    "name": f"git_{relation_id}_dag_bundle",
+                    "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
+                    "kwargs": {
+                        key: value
+                        for key, value in {
+                            "git_conn_id": f"git_relation_{relation_id}_connection"
+                            if connection_info.get("authentication-method")
+                            else None,
+                            "repo_url": connection_info["repository-url"],
+                            "tracking_ref": connection_info.get("tracking-ref"),
+                            "subdir": connection_info.get("path"),
+                            "submodules": False,
+                            "prune_dotgit_folder": True,
+                        }.items()
+                        if value is not None
+                    },
+                }
+                for relation_id, connection_info in {
+                    git_unauthenticated_relation.id: git_unauthenticated_relation.remote_app_data,
+                    git_credentials_relation.id: git_credentials_relation.remote_app_data,
+                    git_ssh_relation.id: git_ssh_relation.remote_app_data,
+                }.items()
+            ]
 
 
 def test_runtime_secrets_generated_and_stored_in_app_secret(
@@ -554,7 +673,12 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
 
 
 def test_runtime_secrets_reused_across_events(
-    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+    context,
+    state,
+    all_required_relations,
+    mock_command_executor,
+    workload_container,
+    peer_relation,
 ):
     """Verify the same application secret is reused on subsequent events."""
     with unittest.mock.patch(
@@ -565,11 +689,7 @@ def test_runtime_secrets_reused_across_events(
     ):
         state_out = context.run(
             context.on.pebble_ready(workload_container),
-            ops.testing.State(
-                leader=True,
-                relations=all_required_relations,
-                containers=[workload_container],
-            ),
+            state,
         )
 
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -593,14 +713,12 @@ def test_runtime_secrets_reused_across_events(
             return_value=MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS
         ),
     ):
+        state_in = dataclasses.replace(
+            state, relations=relations, secrets=[*state.secrets, first_secret]
+        )
         state_out_2 = context.run(
             context.on.start(),
-            ops.testing.State(
-                leader=True,
-                relations=relations,
-                containers=[workload_container],
-                secrets=[first_secret],
-            ),
+            state_in,
         )
 
     peer_2 = state_out_2.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -618,12 +736,19 @@ def test_runtime_secrets_reused_across_events(
 
 
 def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
-    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+    context,
+    state,
+    all_required_relations,
+    mock_command_executor,
+    workload_container,
+    peer_relation,
 ):
     """Verify runtime secret is created and only secret ID is stored in peer app data."""
     clean_peer = dataclasses.replace(peer_relation, local_app_data={})
     relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(clean_peer)
+
+    state_in = dataclasses.replace(state, relations=relations)
 
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
@@ -633,11 +758,7 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
     ):
         state_out = context.run(
             context.on.pebble_ready(workload_container),
-            ops.testing.State(
-                leader=True,
-                relations=relations,
-                containers=[workload_container],
-            ),
+            state_in,
         )
 
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -683,18 +804,15 @@ class TestKubernetesExecutorConfig:
     def test_kubernetes_executor_config_returns_none_when_relation_empty(
         self,
         context,
+        state,
         all_required_relations,
         kubernetes_executor_config_relation_empty,
-        workload_container,
         mock_command_executor,
     ):
         """Verify _kubernetes_executor_config returns None when relation has no data yet."""
         all_required_relations.append(kubernetes_executor_config_relation_empty)
-        state = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=all_required_relations,
-        )
+
+        state = dataclasses.replace(state, relations=all_required_relations)
 
         with context(context.on.start(), state) as manager:
             charm = manager.charm

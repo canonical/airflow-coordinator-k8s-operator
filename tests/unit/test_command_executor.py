@@ -6,6 +6,7 @@
 import json
 import unittest.mock
 
+import charms.git_integrator.v0.git as git
 import ops.pebble
 import pytest
 
@@ -171,6 +172,119 @@ class TestCommandExecutor:
                 "connections",
                 "delete",
                 "test-connection-id",
+            ],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+        )
+
+    def test_list_airflow_connection_success(self, executor, mock_container):
+        mock_process = unittest.mock.MagicMock()
+        mock_process.wait_output.return_value = ("Airflow connections list output", "")
+        mock_container.exec.return_value = mock_process
+
+        result = executor.list_airflow_connections()
+
+        assert result.success is True
+        assert result.stdout == "Airflow connections list output"
+        assert result.stderr == ""
+        assert result.return_code == 0
+
+        mock_container.exec.assert_called_once_with(
+            [
+                "airflow",
+                "connections",
+                "list",
+                "--output",
+                "json",
+            ],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+        )
+
+    def test_add_airflow_git_credentials_connection_success(self, executor, mock_container):
+        mock_process = unittest.mock.MagicMock()
+        mock_process.wait_output.return_value = ("Airflow connection added", "")
+        mock_container.exec.return_value = mock_process
+
+        git_provider_model_credentials = git.GitProviderModel(
+            repository_url="test-repo-url",
+            path="test/path/",
+            tracking_ref="test-tracking-ref",
+            authentication_method=git.AuthenticationMethodEnum.CREDENTIALS,
+            credentials_username="test-user",
+            credentials_personal_access_token="test-personal-access-token",
+        )
+
+        result = executor.add_airflow_git_connection(
+            "test-connection-id",
+            git_provider_model_credentials,
+        )
+
+        assert result.success is True
+        assert result.stdout == "Airflow connection added"
+        assert result.stderr == ""
+        assert result.return_code == 0
+
+        mock_container.exec.assert_called_once_with(
+            [
+                "airflow",
+                "connections",
+                "add",
+                "test-connection-id",
+                "--conn-type",
+                "git",
+                "--conn-host",
+                "test-repo-url",
+                "--conn-login",
+                "test-user",
+                "--conn-password",
+                "test-personal-access-token",
+            ],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+        )
+
+    def test_add_airflow_git_ssh_connection_success(self, executor, mock_container):
+        mock_process = unittest.mock.MagicMock()
+        mock_process.wait_output.return_value = ("Airflow connection added", "")
+        mock_container.exec.return_value = mock_process
+
+        git_provider_model_ssh = git.GitProviderModel(
+            repository_url="test-repo-url",
+            path="test/path/",
+            tracking_ref="test-tracking-ref",
+            authentication_method=git.AuthenticationMethodEnum.SSH,
+            ssh_private_key="test-private-key",
+            ssh_strict_host_key_checking=True,
+        )
+
+        result = executor.add_airflow_git_connection(
+            "test-connection-id",
+            git_provider_model_ssh,
+        )
+
+        assert result.success is True
+        assert result.stdout == "Airflow connection added"
+        assert result.stderr == ""
+        assert result.return_code == 0
+
+        mock_container.exec.assert_called_once_with(
+            [
+                "airflow",
+                "connections",
+                "add",
+                "test-connection-id",
+                "--conn-type",
+                "git",
+                "--conn-host",
+                "test-repo-url",
+                "--conn-extra",
+                json.dumps(
+                    {
+                        "private_key": "test-private-key",
+                        "strict_host_key_checking": True,
+                    },
+                ),
             ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,

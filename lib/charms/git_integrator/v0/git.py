@@ -122,7 +122,7 @@ SSHPrivateKeyStr = typing.Annotated[
 class GitProviderModel(data_interfaces.BaseCommonModel):
     """Provider side of the git relation interface."""
 
-    repository_url: str | None = None
+    repository_url: str
     path: str | None = pydantic.Field(default=None, tag="resettable")
     tracking_ref: str | None = pydantic.Field(default=None, tag="resettable")
 

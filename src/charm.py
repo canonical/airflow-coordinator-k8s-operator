@@ -314,6 +314,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 str(relation.id)
                 for relation in self._git_requires.relations
                 if relation.id not in self._git_requires.get_git_connection_information()
+                and relation.data[relation.app]
             ]
 
             if errorneous_relation_ids:
@@ -517,6 +518,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             relation_id,
             git_provider_model,
         ) in self._git_requires.get_git_connection_information().items():
+            if git_provider_model.authentication_method is None:
+                logger.debug(
+                    f"Skipping Airflow connection creation for relation {relation_id}"
+                    " since it has not authentication"
+                )
+                continue
+
             connection_id = f"git_relation_{relation_id}_connection"
 
             if _has_git_connection_changed(connection_id, git_provider_model):

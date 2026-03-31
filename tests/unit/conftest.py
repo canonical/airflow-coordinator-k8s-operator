@@ -4,6 +4,7 @@
 import logging
 import unittest.mock
 
+import charms.git_integrator.v0.git as git
 import ops.testing
 import pytest
 
@@ -187,6 +188,71 @@ def s3_integrator_relation2():
 
 
 @pytest.fixture(scope="function")
+def git_unauthenticated_relation():
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url1",
+            "path": "test/path/1/",
+            "tracking-ref": "test-tracking-ref1",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_credentials_secret():
+    return ops.testing.Secret(
+        {
+            "credentials-personal-access-token": "test-token",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_credentials_relation(git_credentials_secret):
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url2",
+            "path": "test/path/2/",
+            "tracking-ref": "test-tracking-ref2",
+            "authentication-method": git.AuthenticationMethodEnum.CREDENTIALS,
+            "credentials-username": "user",
+            "secret-credentials-personal-access-token": git_credentials_secret.id,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_ssh_secret():
+    return ops.testing.Secret(
+        {
+            "ssh-private-key": "test-key",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_ssh_relation(git_ssh_secret):
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url3",
+            "path": "test/path/3/",
+            "tracking-ref": "test-tracking-ref3",
+            "authentication-method": git.AuthenticationMethodEnum.SSH,
+            "secret-ssh-private-key": git_ssh_secret.id,
+            "ssh-strict-host-key-checking": "true",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_integrator_relation_empty():
+    return ops.testing.Relation(constants.GIT_ENDPOINT_NAME, remote_app_data={})
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,
     api_server_relation,
@@ -197,6 +263,9 @@ def all_required_relations(
     airflow_api_server_requires_relation,
     s3_integrator_relation,
     s3_integrator_relation2,
+    git_unauthenticated_relation,
+    git_credentials_relation,
+    git_ssh_relation,
 ):
     return [
         postgres_relation,
@@ -208,6 +277,9 @@ def all_required_relations(
         airflow_api_server_requires_relation,
         s3_integrator_relation,
         s3_integrator_relation2,
+        git_unauthenticated_relation,
+        git_credentials_relation,
+        git_ssh_relation,
     ]
 
 
@@ -236,9 +308,16 @@ def mock_command_executor():
 
 
 @pytest.fixture(scope="function")
-def state(all_required_relations, workload_container, mock_command_executor):
+def state(
+    all_required_relations,
+    workload_container,
+    git_credentials_secret,
+    git_ssh_secret,
+    mock_command_executor,
+):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
         containers=[workload_container],
+        secrets=[git_credentials_secret, git_ssh_secret],
     )
