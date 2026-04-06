@@ -102,12 +102,10 @@ class AirflowConfigGenerator:
         FIXME: This config should be returned by the API server charm itself,
         not generated here by the coordinator.
         """
-        host = self._charm._api_server_requires.api_server_host
-        port = self._charm._api_server_requires.api_server_port
         return {
             "api": {
                 "base_url": self._api_server_base_url,
-                "port": str(port),
+                "port": str(self._charm._api_server_requires.api_server_port),
             },
         }
 

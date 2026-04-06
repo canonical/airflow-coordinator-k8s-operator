@@ -105,12 +105,15 @@ class AirflowAPIServerProvides(ops.Object):
         self._relation.data[self._charm.app][HOST_KEY] = host
         self._relation.data[self._charm.app][PORT_KEY] = port
 
-    def set_ingress_path(self, path: str) -> None:
+    def set_ingress_path(self, path: str | None) -> None:
         """Write the ingress path prefix to the relation."""
         relation = self._charm.model.get_relation(self._relation_name)
         if not relation or not self._charm.unit.is_leader():
             return
-        relation.data[self._charm.app][INGRESS_PATH_KEY] = path
+        if path:
+            relation.data[self._charm.app][INGRESS_PATH_KEY] = path
+        else:
+            relation.data[self._charm.app].pop(INGRESS_PATH_KEY, None)
 
     def clear_ingress_path(self) -> None:
         """Remove the ingress path prefix from the relation."""
@@ -161,4 +164,5 @@ class AirflowAPIServerRequires(ops.Object):
         """Return the API server's ingress path prefix if available."""
         if not self._relation or not self._relation.app:
             return None
+
         return self._relation.data[self._relation.app].get(INGRESS_PATH_KEY)
