@@ -38,6 +38,7 @@ AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
 )
+ISSUE_QUERYING_DATABASE_MESSAGE = "Issue querying Airflow database. Will retry..."
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"

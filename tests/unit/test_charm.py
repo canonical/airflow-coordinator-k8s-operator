@@ -373,6 +373,21 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
 
 
 class TestS3DagBundles:
+    def test_issue_querying_airflow_connections(
+        self,
+        context,
+        state,
+        mock_command_executor
+    ):
+        """Ensure proper handling if there is an issue querying Airflow connections."""
+        mock_command_executor["list_airflow_connections"].return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="Some sqlalchemy error", return_code=0
+        )
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(constants.ISSUE_QUERYING_DATABASE_MESSAGE)
+
     def test_invalid_data_from_s3_integrators(
         self,
         context,

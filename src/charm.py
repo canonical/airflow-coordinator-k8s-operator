@@ -405,6 +405,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """Create or update s3 connections that have changed."""
         airflow_connections = self._command_executor.list_airflow_connections().parsed_stdout
 
+        if airflow_connections is None:
+            raise ExceptionWithStatusError(
+                constants.ISSUE_QUERYING_DATABASE_MESSAGE,
+                ops.BlockedStatus,
+            )
+
         def _has_s3_connection_changed(
             connection_id: str, connection_info: S3ConnectionInfo
         ) -> bool:
@@ -481,6 +487,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     def _delete_stale_connections(self) -> None:
         """Delete stale s3 connections (s3 connections without relations)."""
         airflow_connections = self._command_executor.list_airflow_connections().parsed_stdout
+
+        if airflow_connections is None:
+            raise ExceptionWithStatusError(
+                constants.ISSUE_QUERYING_DATABASE_MESSAGE,
+                ops.BlockedStatus,
+            )
 
         s3_relation_connection_ids = [
             f"s3_relation_{relation_id}_connection" for relation_id in self.s3_connections
