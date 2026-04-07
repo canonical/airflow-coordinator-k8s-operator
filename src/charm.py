@@ -521,7 +521,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         def _has_git_connection_changed(
             connection_id: str, git_provider_model: git.GitProviderModel
         ) -> bool:
-            """Helper to determine if an git connection's info has changed."""
+            """Return True if git relation data changed, False otherwise."""
             filtered_airflow_connections = list(
                 filter(
                     lambda connection: connection["conn_id"] == connection_id, airflow_connections
@@ -533,40 +533,34 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             airflow_connection = filtered_airflow_connections[0]
 
-            has_authentication_changed = False
-
             if (
                 git_provider_model.authentication_method
                 == git.AuthenticationMethodEnum.CREDENTIALS
             ):
-                # Existing airflow connection has SSH parameters
-                if airflow_connection["extra_dejson"].get("private_key") or airflow_connection[
-                    "extra_dejson"
-                ].get("strict_host_key_checking"):
-                    has_authentication_changed = True
-
-                # Existing credentials not the same as credentials in relation
-                if (
-                    airflow_connection.get("login") != git_provider_model.credentials_username
+                # Existing airflow connection has SSH parameters or
+                # credentials parameters changed
+                has_authentication_changed = (
+                    airflow_connection["extra_dejson"].get("private_key")
+                    or airflow_connection["extra_dejson"].get("strict_host_key_checking")
+                    or airflow_connection.get("login") != git_provider_model.credentials_username
                     or airflow_connection.get("password")
                     != git_provider_model.credentials_personal_access_token
-                ):
-                    has_authentication_changed = True
-
+                )
             elif git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
-                # Existing airflow connection has credentials
-                if airflow_connection.get("login") or airflow_connection.get("password"):
-                    has_authentication_changed = True
-
-                if (
-                    airflow_connection["extra_dejson"].get("private_key")
+                # Existing airflow connection has credentials or
+                # SSH parameters changed
+                has_authentication_changed = (
+                    airflow_connection.get("login")
+                    or airflow_connection.get("password")
+                    or airflow_connection["extra_dejson"].get("private_key")
                     != git_provider_model.ssh_private_key
                     or json.loads(
                         airflow_connection["extra_dejson"].get("strict_host_key_checking")
                     )
                     != git_provider_model.ssh_strict_host_key_checking
-                ):
-                    has_authentication_changed = True
+                )
+            else:
+                has_authentication_changed = False
 
             return not (
                 airflow_connection["conn_type"] == "git"
@@ -581,7 +575,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             if git_provider_model.authentication_method is None:
                 logger.debug(
                     f"Skipping Airflow connection creation for relation {relation_id}"
-                    " since it has not authentication"
+                    " since it has no authentication"
                 )
                 continue
 
