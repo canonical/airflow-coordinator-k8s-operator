@@ -9,6 +9,7 @@ import unittest.mock
 import ops.pebble
 import pytest
 
+import charm
 import command_executor
 import constants
 
@@ -25,6 +26,22 @@ def mock_container():
 def executor(mock_container):
     """Create a CommandExecutor instance with a mock container."""
     return command_executor.CommandExecutor(mock_container)
+
+
+@pytest.fixture
+def mock_s3_connection_info():
+    """Mock S3ConnectionInfo instance."""
+    return charm.S3ConnectionInfo.from_s3_info(
+        {
+            "bucket": "test-bucket",
+            "access-key": "test-access-key",
+            "secret-key": "test-secret-key",
+            "region": "test-region",
+            "endpoint": "test-endpoint",
+            "path": "test/path",
+            "tls-ca-chain": ["test-chain1", "test-chain2"],
+        }
+    )
 
 
 class TestCommandExecutor:
@@ -79,32 +96,23 @@ class TestCommandExecutor:
 
         assert "Failed to execute command with error: Unexpected error" in str(exc_info.value)
 
-    def test_add_airflow_s3_connection_success(self, executor, mock_container):
+    def test_add_airflow_s3_connection_success(
+        self, executor, mock_container, mock_s3_connection_info
+    ):
         mock_process = unittest.mock.MagicMock()
         mock_process.wait_output.return_value = ("Airflow connection added", "")
         mock_container.exec.return_value = mock_process
 
         result = executor.add_airflow_s3_connection(
             "test-connection-id",
-            "test-access-key",
-            "test-secret-access-key",
-            region="test-region",
-            endpoint="test-endpoint",
-            tls_ca_chain=["test-ca-chain1", "test-ca-chain2"],
+            mock_s3_connection_info,
+            tls_ca_chain_path="/opt/airflow/connection_certs/test-connection-id.pem",
         )
 
         assert result.success is True
         assert result.stdout == "Airflow connection added"
         assert result.stderr == ""
         assert result.return_code == 0
-
-        mock_container.push.assert_called_once_with(
-            path="/opt/airflow/connection_certs/test-connection-id.pem",
-            source="\n".join(["test-ca-chain1", "test-ca-chain2"]),
-            make_dirs=True,
-            user=constants.WORKLOAD_USER,
-            group=constants.WORKLOAD_GROUP,
-        )
 
         mock_container.exec.assert_called_once_with(
             [
@@ -117,7 +125,7 @@ class TestCommandExecutor:
                 "--conn-login",
                 "test-access-key",
                 "--conn-password",
-                "test-secret-access-key",
+                "test-secret-key",
                 "--conn-extra",
                 json.dumps(
                     {
@@ -129,10 +137,13 @@ class TestCommandExecutor:
             ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
         )
 
     def test_add_airflow_s3_connection_failure_pushing_tls_ca_chain(
-        self, executor, mock_container
+        self, executor, mock_container, mock_s3_connection_info
     ):
         mock_container.push.side_effect = ops.pebble.PathError(
             kind="generic-file-error",
@@ -142,11 +153,10 @@ class TestCommandExecutor:
         with pytest.raises(command_executor.CommandExecutionError) as exc_info:
             executor.add_airflow_s3_connection(
                 "test-connection-id",
-                "test-access-key",
-                "test-secret-access-key",
-                region="test-region",
-                endpoint="test-endpoint",
-                tls_ca_chain=["test-ca-chain1", "test-ca-chain2"],
+                mock_s3_connection_info,
+                environment={
+                    "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+                },
             )
 
             assert "Unexpected error pushing TLS CA chain: " in str(exc_info.value)
@@ -174,4 +184,7 @@ class TestCommandExecutor:
             ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
         )

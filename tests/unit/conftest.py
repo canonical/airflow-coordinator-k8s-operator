@@ -163,7 +163,7 @@ S3_INTEGRATOR_DATA = {
     "path": "test-path",
     "endpoint": "test-endpoint",
     "region": "test-region",
-    "tls-ca-chain": "test-ca-chain1,test-ca-chain2",
+    "tls-ca-chain": '["test-ca-chain1","test-ca-chain2"]',
 }
 
 
@@ -221,17 +221,52 @@ def mock_run_db_migrate():
         yield mock
 
 
+@pytest.fixture
+def mock_container_pull():
+    """Mock the pebble.Container.pull method."""
+    with unittest.mock.patch(
+        "ops.Container.pull",
+    ) as mock_pull:
+        yield mock_pull
+
+
 @pytest.fixture(scope="function")
 def mock_command_executor():
     """Mock the command executor to avoid actual container operations."""
-    with unittest.mock.patch.object(
-        command_executor.CommandExecutor, "run_db_migrate"
-    ) as mock_run_db_migrate:
+    with (
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor, "run_db_migrate"
+        ) as mock_run_db_migrate,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor, "list_airflow_connections"
+        ) as mock_list_airflow_connections,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "add_airflow_s3_connection",
+        ) as mock_add_airflow_s3_connection,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "delete_airflow_connection",
+        ) as mock_delete_airflow_connection,
+    ):
         mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
-            success=True, stdout="", stderr="", return_code=0
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
         )
+        mock_list_airflow_connections.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+        )
+        mock_add_airflow_s3_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
+        )
+        mock_delete_airflow_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+        )
+
         yield {
             "run_db_migrate": mock_run_db_migrate,
+            "list_airflow_connections": mock_list_airflow_connections,
+            "add_airflow_s3_connection": mock_add_airflow_s3_connection,
+            "delete_airflow_connection": mock_delete_airflow_connection,
         }
 
 

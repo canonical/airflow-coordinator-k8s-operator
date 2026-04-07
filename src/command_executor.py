@@ -10,6 +10,7 @@ import typing
 
 import ops
 
+import charm
 import constants
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class CommandExecutionResult(typing.NamedTuple):
 
     success: bool
     stdout: str
+    parsed_stdout: list | dict | None
     stderr: str
     return_code: int | None
 
@@ -65,9 +67,16 @@ def execute_pebble_exec_process(func: typing.Callable):
 
             logger.debug(f"'{' '.join(process._command)}' completed successfully")
 
+            try:
+                print(stdout)
+                parsed_stdout = json.loads(stdout) if stdout else None
+            except json.JSONDecodeError:
+                parsed_stdout = None
+
             return CommandExecutionResult(
                 success=True,
                 stdout=stdout or "",
+                parsed_stdout=parsed_stdout,
                 stderr=stderr or "",
                 return_code=0,
             )
@@ -78,6 +87,7 @@ def execute_pebble_exec_process(func: typing.Callable):
             return CommandExecutionResult(
                 success=False,
                 stdout=e.stdout or "",
+                parsed_stdout=None,
                 stderr=e.stderr or "",
                 return_code=e.exit_code,
             )
@@ -105,7 +115,7 @@ class CommandExecutor:
         return self._container.exec(
             ["airflow", "db", "migrate"],
             environment={
-                "AIRFLOW_HOME": "/opt/airflow",
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
             },
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
@@ -115,11 +125,8 @@ class CommandExecutor:
     def add_airflow_s3_connection(
         self,
         connection_id: str,
-        access_key_id: str,
-        secret_access_key: str,
-        region: typing.Optional[str] = None,
-        endpoint: typing.Optional[str] = None,
-        tls_ca_chain: list[str] = None,
+        connection_info: charm.S3ConnectionInfo,
+        tls_ca_chain_path: typing.Optional[str] = None,
     ) -> ops.pebble.ExecProcess:
         """Add/update Airflow S3 connection.
 
@@ -127,28 +134,14 @@ class CommandExecutor:
         """
         extras = {}
 
-        if region:
-            extras["region_name"] = region
+        if connection_info.region:
+            extras["region_name"] = connection_info.region
 
-        if endpoint:
-            extras["endpoint_url"] = endpoint
+        if connection_info.endpoint:
+            extras["endpoint_url"] = connection_info.endpoint
 
-        if tls_ca_chain:
-            tls_ca_path = constants.TLS_CA_CHAIN_FILEPATH_TEMPLATE.format(filename=connection_id)
-
-            try:
-                self._container.push(
-                    path=tls_ca_path,
-                    source="\n".join(tls_ca_chain),
-                    make_dirs=True,
-                    user=constants.WORKLOAD_USER,
-                    group=constants.WORKLOAD_GROUP,
-                )
-            except ops.pebble.PathError as e:
-                logger.error(f"Unexpected error pushing TLS CA chain: {e}")
-                raise CommandExecutionError(f"Failed to push TLS CA chain: {e}") from e
-
-            extras["verify"] = tls_ca_path
+        if tls_ca_chain_path:
+            extras["verify"] = tls_ca_chain_path
 
         extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
 
@@ -162,13 +155,16 @@ class CommandExecutor:
                 "--conn-type",
                 "aws",
                 "--conn-login",
-                access_key_id,
+                connection_info.access_key,
                 "--conn-password",
-                secret_access_key,
+                connection_info.secret_key,
                 *extras_options,
             ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
         )
 
     @execute_pebble_exec_process
@@ -178,6 +174,9 @@ class CommandExecutor:
             ["airflow", "connections", "delete", connection_id],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
         )
 
     @execute_pebble_exec_process
@@ -187,4 +186,7 @@ class CommandExecutor:
             ["airflow", "connections", "list", "--output", "json"],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
         )
