@@ -429,7 +429,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             try:
                 tls_ca_chain = (
                     self._container.pull(
-                        f"/opt/airflow/connection_certs/{connection_id}.pem",
+                        f"/{constants.AIRFLOW_HOME}/connection_certs/{connection_id}.pem",
                         encoding="utf-8",
                     ).read()
                     if connection_info.tls_ca_chain
