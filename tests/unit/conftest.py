@@ -164,7 +164,7 @@ S3_INTEGRATOR_DATA = {
     "path": "test-path",
     "endpoint": "test-endpoint",
     "region": "test-region",
-    "tls-ca-chain": "test-ca-chain1,test-ca-chain2",
+    "tls-ca-chain": '["test-ca-chain1","test-ca-chain2"]',
 }
 
 
@@ -283,30 +283,6 @@ def all_required_relations(
     ]
 
 
-@pytest.fixture
-def mock_run_db_migrate():
-    """Mock the charm's _run_db_migrate method."""
-    with unittest.mock.patch.object(
-        AirflowCoordinatorK8SOperatorCharm,
-        "_run_db_migrate",
-    ) as mock:
-        yield mock
-
-
-@pytest.fixture(scope="function")
-def mock_command_executor():
-    """Mock the command executor to avoid actual container operations."""
-    with unittest.mock.patch.object(
-        command_executor.CommandExecutor, "run_db_migrate"
-    ) as mock_run_db_migrate:
-        mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
-            success=True, stdout="", stderr="", return_code=0
-        )
-        yield {
-            "run_db_migrate": mock_run_db_migrate,
-        }
-
-
 @pytest.fixture(scope="function")
 def state(
     all_required_relations,
@@ -321,3 +297,109 @@ def state(
         containers=[workload_container],
         secrets=[git_credentials_secret, git_ssh_secret],
     )
+
+
+@pytest.fixture(scope="function")
+def state_without_git(
+    all_required_relations,
+    workload_container,
+    mock_command_executor,
+):
+    relations_without_git = [
+        relation
+        for relation in all_required_relations
+        if relation.endpoint != constants.GIT_ENDPOINT_NAME
+    ]
+    return ops.testing.State(
+        leader=True,
+        relations=relations_without_git,
+        containers=[workload_container],
+    )
+
+
+@pytest.fixture(scope="function")
+def state_without_s3(
+    all_required_relations,
+    workload_container,
+    git_credentials_secret,
+    git_ssh_secret,
+    mock_command_executor,
+):
+    relations_without_s3 = [
+        relation
+        for relation in all_required_relations
+        if relation.endpoint != constants.S3_ENDPOINT_NAME
+    ]
+    return ops.testing.State(
+        leader=True,
+        relations=relations_without_s3,
+        containers=[workload_container],
+        secrets=[git_credentials_secret, git_ssh_secret],
+    )
+
+
+@pytest.fixture
+def mock_run_db_migrate():
+    """Mock the charm's _run_db_migrate method."""
+    with unittest.mock.patch.object(
+        AirflowCoordinatorK8SOperatorCharm,
+        "_run_db_migrate",
+    ) as mock:
+        yield mock
+
+
+@pytest.fixture
+def mock_container_pull():
+    """Mock the pebble.Container.pull method."""
+    with unittest.mock.patch(
+        "ops.Container.pull",
+    ) as mock_pull:
+        yield mock_pull
+
+
+@pytest.fixture(scope="function")
+def mock_command_executor():
+    """Mock the command executor to avoid actual container operations."""
+    with (
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor, "run_db_migrate"
+        ) as mock_run_db_migrate,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor, "list_airflow_connections"
+        ) as mock_list_airflow_connections,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "add_airflow_s3_connection",
+        ) as mock_add_airflow_s3_connection,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "delete_airflow_connection",
+        ) as mock_delete_airflow_connection,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "add_airflow_git_connection",
+        ) as mock_add_airflow_git_connection,
+    ):
+        mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
+        )
+        mock_list_airflow_connections.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+        )
+        mock_add_airflow_s3_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
+        )
+        mock_delete_airflow_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+        )
+        mock_add_airflow_git_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
+        )
+
+        yield {
+            "run_db_migrate": mock_run_db_migrate,
+            "list_airflow_connections": mock_list_airflow_connections,
+            "add_airflow_s3_connection": mock_add_airflow_s3_connection,
+            "delete_airflow_connection": mock_delete_airflow_connection,
+            "add_airflow_git_connection": mock_add_airflow_git_connection,
+        }
