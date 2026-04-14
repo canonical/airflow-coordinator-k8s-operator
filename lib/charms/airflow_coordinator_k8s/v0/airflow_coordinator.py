@@ -1024,9 +1024,16 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
         provider_content = self._requirer_handler.provider_content
 
         for filename, tls_ca_chain in provider_content.tls_ca_chains.items():
-            self._workload_container.push(
-                filename, tls_ca_chain, user=user, group=group, make_dirs=True
+            on_disk_tls_ca_chain = (
+                self._workload_container.pull(filename).read()
+                if self._workload_container.exists(filename)
+                else None
             )
+
+            if on_disk_tls_ca_chain != tls_ca_chain:
+                self._workload_container.push(
+                    filename, tls_ca_chain, user=user, group=group, make_dirs=True
+                )
 
 
 class AirflowCoordinatorProvides(ops.Object):

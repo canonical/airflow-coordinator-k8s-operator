@@ -10,6 +10,7 @@ import logging
 import pathlib
 import tempfile
 import typing
+import unittest.mock
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops
@@ -984,6 +985,53 @@ class TestAirflowCoordinatorCoreRequires:
             assert tls_ca_chains_file2.is_file()
             assert tls_ca_chains_file2.read_text(encoding="utf-8") == "chain2\nchain3"
             assert tls_ca_chains_file2.stat().st_mode & 0o777 == 0o644
+
+            with unittest.mock.patch("ops.Container.push") as mock_push:
+                # Ensure re-invoked write_tls_ca_chains does not update files if no changes
+                manager.charm.requirer.write_tls_ca_chains(
+                    constants.WORKLOAD_USER, constants.WORKLOAD_GROUP
+                )
+
+                mock_push.assert_not_called()
+
+                # Ensure update of one file's contents results in update of only that file
+                tls_ca_chains_file1.write_text("changed-chain")
+
+                manager.charm.requirer.write_tls_ca_chains(
+                    constants.WORKLOAD_USER, constants.WORKLOAD_GROUP
+                )
+
+                mock_push.assert_called_once_with(
+                    "/file1",
+                    "chain1",
+                    user=constants.WORKLOAD_USER,
+                    group=constants.WORKLOAD_GROUP,
+                    make_dirs=True,
+                )
+
+                # Ensure update to both files if both file contents changed
+                tls_ca_chains_file2.write_text("changed-chain2")
+
+                manager.charm.requirer.write_tls_ca_chains(
+                    constants.WORKLOAD_USER, constants.WORKLOAD_GROUP
+                )
+
+                mock_push.mock_calls == [
+                    unittest.mock.call(
+                        "/file1",
+                        "chain1",
+                        user=constants.WORKLOAD_USER,
+                        group=constants.WORKLOAD_GROUP,
+                        make_dirs=True,
+                    ),
+                    unittest.mock.call(
+                        "/file2",
+                        "chain2\nchain3",
+                        user=constants.WORKLOAD_USER,
+                        group=constants.WORKLOAD_GROUP,
+                        make_dirs=True,
+                    ),
+                ]
 
 
 class TestAirflowCoordinatorProvides:
