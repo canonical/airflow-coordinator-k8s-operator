@@ -61,6 +61,8 @@ requires:
   airflow-kubernetes-executor-config:
     interface: airflow_kubernetes_executor
     limit: 1
+  s3:
+    interface: s3
 
 peers:
   coordinator-peers:
