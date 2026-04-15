@@ -65,3 +65,64 @@ requires:
 peers:
   coordinator-peers:
     interface: coordinator_peers
+
+config:
+  options:
+    core_default_timezone:
+      type: string
+      default: utc
+      description: |
+        Value for core.default_timezone in the airflow.cfg file
+
+        Default timezone in case supplied date times are naive.
+        Can be UTC (default), system, or any IANA <https://www.iana.org/time-zones> timezone string
+    core_max_active_runs_per_dag:
+      type: int
+      default: 16
+      description: |
+        Value for core.max_active_runs_per_dag in the airflow.cfg file
+
+        The maximum number of active DAG runs per DAG. The scheduler will not create
+        more DAG runs if it reaches the limit
+    core_max_active_tasks_per_dag:
+      type: int
+      default: 16
+      description: |
+        Value for core.max_active_tasks_per_dag in the airflow.cfg file
+
+        The maximum number of task instances allowed to run concurrently in each dag run.
+        An example scenario when this would be useful is when you want to stop a new dag
+        run with an early start date from occupying all the executor slots in a cluster
+    core_parallelism:
+      type: int
+      default: 32
+      description: |
+        Value for core.parallelism in the airflow.cfg file
+
+        Defines the maximum number of task instances that can run concurrently per
+        scheduler in Airflow, regardless of the worker count. Generally, this value,
+        multiplied by the number of schedulers in the cluster, is the maximum number
+        of task instances with the running state in the metadata database
+    dag_processor_parsing_processes:
+      type: int
+      default: 2
+      description: |
+        Value for dag_processor.parsing_processes in airflow.cfg file
+
+        The DAG processor can run multiple processes in parallel to parse DAGs.
+        This configuration defines how many such processes will run for each DAG processor
+    database_sql_alchemy_pool_size:
+      type: int
+      default: 5
+      description: |
+        Value for databse.sql_alchemy_pool_size in airflow.cfg file
+
+        The SQLAlchemy pool size is the maximum number of database connections in the pool.
+        0 indicates no limit
+    triggerer_capacity:
+      type: int
+      default: 1000
+      description: |
+        Value for triggerer.capacity in airflow.cfg file
+
+        Number of triggers a single triggerer will run at once by default

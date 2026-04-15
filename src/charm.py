@@ -7,10 +7,12 @@
 import json
 import logging
 import secrets
+import zoneinfo
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
+import mergedeep
 import ops
 from cryptography.fernet import Fernet
 from ops.pebble import LayerDict
@@ -249,8 +251,42 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return None
         return content.kubernetes_executor_pod_spec
 
+    def _validate_configs(self):
+        """Ensure validity of charm configurations."""
+        if not self.config:
+            return
+
+        try:
+            timezone = self.config.get(constants.CORE_DEFAULT_TIMEZONE_CONFIG, "")
+
+            if timezone.lower() not in ["utc", "system"]:
+                zoneinfo.ZoneInfo(timezone)
+        except zoneinfo.ZoneInfoNotFoundError:
+            raise ExceptionWithStatusError(
+                constants.INVALID_CONFIG_MESSAGE.format(
+                    config_name=constants.CORE_DEFAULT_TIMEZONE_CONFIG
+                ),
+                ops.BlockedStatus,
+            )
+
+        for config in [
+            constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG,
+            constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG,
+            constants.CORE_PARALLELISM_CONFIG,
+            constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG,
+            constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG,
+            constants.TRIGGERER_CAPACITY_CONFIG,
+        ]:
+            if self.config[config] < 0:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_CONFIG_MESSAGE.format(config_name=config),
+                    ops.BlockedStatus,
+                )
+
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
+        self._validate_configs()
+
         if not self._container.can_connect():
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
@@ -370,8 +406,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
                 self._config_generator.config_template_with_extra_config(
-                    **self._config_generator.api_server_config,
-                    **(self._kubernetes_executor_config or {}),
+                    **mergedeep.merge(
+                        self._config_generator.api_server_config,
+                        (self._kubernetes_executor_config or {}),
+                        self._config_generator.coordinator_charm_core_config,
+                    ),
                 ),
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
                 sensitive_data={

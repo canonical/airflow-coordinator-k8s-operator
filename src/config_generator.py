@@ -10,6 +10,8 @@ import pathlib
 
 import ops
 
+import constants
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,50 @@ class AirflowConfigGenerator:
             "api": {
                 "base_url": self._api_server_base_url,
                 "port": str(self._charm._api_server_requires.api_server_port),
+            },
+        }
+
+    @property
+    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | bool]]:
+        """Return the Airflow core config extracted from this charm's juju config.
+
+        This property also updates changes values of certain Airflow configurations
+        (those options that are not dynamically set to charm config values).
+
+        Uses the same {section: {key: value}} pattern as executor config.
+        """
+        return {
+            "api": {
+                "enable_swagger_ui": False,
+            },
+            "core": {
+                "default_timezone": self._charm.config[constants.CORE_DEFAULT_TIMEZONE_CONFIG],
+                "max_active_runs_per_dag": self._charm.config[
+                    constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG
+                ],
+                "max_active_tasks_per_dag": self._charm.config[
+                    constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG
+                ],
+                "parallelism": self._charm.config[constants.CORE_PARALLELISM_CONFIG],
+                "default_impersonation": constants.WORKLOAD_USER,
+                "dagbag_import_error_tracebacks": False,
+                "check_migrations": False,
+            },
+            "dag_processor": {
+                "parsing_processes": self._charm.config[
+                    constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG
+                ],
+            },
+            "database": {
+                "sql_alchemy_pool_size": self._charm.config[
+                    constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG
+                ],
+            },
+            "scheduler": {
+                "enable_healthcheck": True,
+            },
+            "triggerer": {
+                "capacity": self._charm.config[constants.TRIGGERER_CAPACITY_CONFIG],
             },
         }
 

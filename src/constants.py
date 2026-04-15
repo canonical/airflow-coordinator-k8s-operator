@@ -38,3 +38,13 @@ AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
 )
+
+CORE_DEFAULT_TIMEZONE_CONFIG = "core_default_timezone"
+CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG = "core_max_active_runs_per_dag"
+CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG = "core_max_active_tasks_per_dag"
+CORE_PARALLELISM_CONFIG = "core_parallelism"
+DAG_PROCESSOR_PARSING_PROCESSES_CONFIG = "dag_processor_parsing_processes"
+DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG = "database_sql_alchemy_pool_size"
+TRIGGERER_CAPACITY_CONFIG = "triggerer_capacity"
+
+INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
