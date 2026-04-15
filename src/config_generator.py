@@ -21,6 +21,17 @@ class AirflowConfigGenerator:
         self._charm = charm
 
     @property
+    def _api_server_base_url(self) -> str:
+        """Return the API server base URL, appending the ingress path when available."""
+        host = self._charm._api_server_requires.api_server_host
+        port = self._charm._api_server_requires.api_server_port
+        ingress_path = self._charm._api_server_requires.api_server_ingress_path
+        base = f"http://{host}:{port}"
+        if ingress_path:
+            return f"{base}/{ingress_path}"
+        return base
+
+    @property
     def config_template(self) -> str:
         """The raw Airflow config Jinja2 template to pass to all related components.
 
@@ -92,12 +103,10 @@ class AirflowConfigGenerator:
         FIXME: This config should be returned by the API server charm itself,
         not generated here by the coordinator.
         """
-        host = self._charm._api_server_requires.api_server_host
-        port = self._charm._api_server_requires.api_server_port
         return {
             "api": {
-                "base_url": f"http://{host}:{port}",
-                "port": str(port),
+                "base_url": self._api_server_base_url,
+                "port": str(self._charm._api_server_requires.api_server_port),
             },
         }
 
