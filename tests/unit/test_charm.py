@@ -4,7 +4,9 @@
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
 import configparser
+import copy
 import dataclasses
+import io
 import json
 import unittest.mock
 
@@ -12,11 +14,15 @@ import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordina
 import ops
 import ops.testing
 import pytest
-from conftest import MOCK_KUBERNETES_EXECUTOR_CONFIG, MOCK_KUBERNETES_EXECUTOR_POD_SPEC
+from conftest import (
+    MOCK_KUBERNETES_EXECUTOR_CONFIG,
+    MOCK_KUBERNETES_EXECUTOR_POD_SPEC,
+    S3_INTEGRATOR_DATA,
+)
 
 import command_executor
 import constants
-from charm import AirflowCoordinatorK8SOperatorCharm
+from charm import AirflowCoordinatorK8SOperatorCharm, S3ConnectionInfo
 
 MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS = """[core]
 executor = {{ executor | default('LocalExecutor') }}
@@ -286,7 +292,7 @@ def test_invalid_core_charm_workload_image_hash(
 def test_db_migration_does_not_run_on_state_true(
     context,
     all_required_relations,
-    mock_run_db_migrate,
+    mock_command_executor,
     workload_container,
     peer_relation,
 ):
@@ -315,13 +321,13 @@ def test_db_migration_does_not_run_on_state_true(
             state_in,
         )
 
-    mock_run_db_migrate.assert_not_called()
+    mock_command_executor["run_db_migrate"].assert_not_called()
 
 
 def test_db_migration_runs_on_state_false(
     context,
     all_required_relations,
-    mock_run_db_migrate,
+    mock_command_executor,
     workload_container,
     peer_relation,
 ):
@@ -344,12 +350,12 @@ def test_db_migration_runs_on_state_false(
             state_in,
         )
 
-    mock_run_db_migrate.assert_called_once()
+    mock_command_executor["run_db_migrate"].assert_called_once()
 
 
 def test_db_migration_failure(context, state, mock_command_executor, workload_container):
     mock_command_executor["run_db_migrate"].return_value = command_executor.CommandExecutionResult(
-        success=False, stdout="", stderr="Migration failed", return_code=1
+        success=False, stdout="", parsed_stdout=None, stderr="Migration failed", return_code=1
     )
 
     with unittest.mock.patch(
@@ -365,6 +371,432 @@ def test_db_migration_failure(context, state, mock_command_executor, workload_co
     # Verify that config was not distributed to core charms
     for relation in state_out.get_relations("airflow-coordinator"):
         assert "config-template" not in relation.local_app_data
+
+
+class TestS3DagBundles:
+    def test_issue_querying_airflow_connections(self, context, state, mock_command_executor):
+        """Ensure proper handling if there is an issue querying Airflow connections."""
+        mock_command_executor[
+            "list_airflow_connections"
+        ].return_value = command_executor.CommandExecutionResult(
+            success=True,
+            stdout="",
+            parsed_stdout=None,
+            stderr="Some sqlalchemy error",
+            return_code=0,
+        )
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.ISSUE_QUERYING_DATABASE_MESSAGE
+        )
+
+    def test_invalid_data_from_s3_integrators(
+        self,
+        context,
+        state,
+        all_required_relations,
+        s3_integrator_relation,
+    ):
+        """Charm goes into BlockedStatus if related s3-integrator data invalid."""
+        invalid_s3_relation_data = copy.deepcopy(S3_INTEGRATOR_DATA)
+        invalid_s3_relation_data.pop("bucket")
+
+        invalid_s3_relation = dataclasses.replace(
+            s3_integrator_relation,
+            remote_app_data=invalid_s3_relation_data,
+        )
+
+        relations_with_invalid_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_invalid_s3.append(invalid_s3_relation)
+
+        state = dataclasses.replace(state, relations=relations_with_invalid_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
+                relation_ids=str(s3_integrator_relation.id)
+            )
+        )
+
+    def test_empty_s3_relation_succeeds(
+        self, context, state, all_required_relations, s3_integrator_relation_empty
+    ):
+        """An empty s3 relation is skipped from DAG bundles until data is ready."""
+        relations_with_empty_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_empty_s3.append(s3_integrator_relation_empty)
+
+        state = dataclasses.replace(state, relations=relations_with_empty_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_valid_s3_relations_succeed(
+        self, context, state, s3_integrator_relation, s3_integrator_relation2
+    ):
+        """Valid DAG bundles configured when multiple related s3-integrators."""
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{relation_id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                            "bucket_name": connection_info["bucket"],
+                            "prefix": connection_info["path"],
+                        },
+                    }
+                    for relation_id, connection_info in {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                    }.items()
+                ]
+            )
+
+    def test_valid_s3_relations_non_leader(self, context, state):
+        """Non-leader coordinator units no-op."""
+        state = dataclasses.replace(state, leader=False)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == state.unit_status
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_no_s3_relations(self, context, state, all_required_relations):
+        """Lack of S3 integrators valid (S3 integrator relations are optional)."""
+        relations_without_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        state = dataclasses.replace(state, relations=relations_without_s3)
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            try:
+                parsed.get("dag_processor", "dag_bundle_config_list")
+
+                assert False
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                pass
+
+    def test_change_in_s3_connection(
+        self,
+        context,
+        state,
+        all_required_relations,
+        s3_integrator_relation,
+        s3_integrator_relation2,
+        mock_command_executor,
+        mock_container_pull,
+        workload_container,
+    ):
+        """Test change in one of the S3 relation's connection information."""
+        airflow_connections = [
+            {
+                "conn_id": f"s3_relation_{relation_id}_connection",
+                "conn_type": "aws",
+                "login": "test-access-key",
+                "password": "test-secret-key",
+                "extra_dejson": {
+                    "region_name": "test-region",
+                    "endpoint_url": "test-endpoint",
+                },
+            }
+            for relation_id in [s3_integrator_relation.id, s3_integrator_relation2.id]
+        ]
+
+        mock_container_pull.side_effect = [
+            io.StringIO("\n".join(json.loads(S3_INTEGRATOR_DATA["tls-ca-chain"]))),
+            io.StringIO("\n".join(json.loads(S3_INTEGRATOR_DATA["tls-ca-chain"]))),
+        ]
+
+        mock_command_executor["list_airflow_connections"].side_effect = [
+            command_executor.CommandExecutionResult(
+                success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+            ),
+            command_executor.CommandExecutionResult(
+                success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+            ),
+            command_executor.CommandExecutionResult(
+                success=True,
+                stdout=json.dumps(airflow_connections),
+                parsed_stdout=airflow_connections,
+                stderr="",
+                return_code=0,
+            ),
+            command_executor.CommandExecutionResult(
+                success=True,
+                stdout=json.dumps(airflow_connections),
+                parsed_stdout=airflow_connections,
+                stderr="",
+                return_code=0,
+            ),
+        ]
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{relation_id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                            "bucket_name": connection_info["bucket"],
+                            "prefix": connection_info["path"],
+                        },
+                    }
+                    for relation_id, connection_info in {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                    }.items()
+                ]
+            )
+
+        assert mock_command_executor["add_airflow_s3_connection"].call_count == 2
+        mock_command_executor["add_airflow_s3_connection"].reset_mock()
+
+        modified_s3_relation2 = ops.testing.Relation(
+            constants.S3_ENDPOINT_NAME,
+            id=s3_integrator_relation2.id,
+            remote_app_data={
+                **S3_INTEGRATOR_DATA,
+                "access-key": "modified-access-key",
+            },
+        )
+
+        relations_with_modified_s3 = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_modified_s3.extend([s3_integrator_relation, modified_s3_relation2])
+
+        state_modified = dataclasses.replace(
+            state, relations=relations_with_modified_s3, containers=[workload_container]
+        )
+
+        # note: we're using update_status to trigger reconciler
+        # (due to an issue with object_storage charm lib emitting storage_connection_info_changed)
+        state_out = context.run(context.on.update_status(), state_modified)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{relation_id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                            "bucket_name": connection_info["bucket"],
+                            "prefix": connection_info["path"],
+                        },
+                    }
+                    for relation_id, connection_info in {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        modified_s3_relation2.id: modified_s3_relation2.remote_app_data,
+                    }.items()
+                ]
+            )
+
+        mock_command_executor["add_airflow_s3_connection"].mock_calls == [
+            unittest.mock.call(
+                f"s3_relation_{s3_integrator_relation.id}_connection",
+                S3ConnectionInfo.from_s3_info(s3_integrator_relation.remote_app_data),
+            ),
+            unittest.mock.call(
+                f"s3_relation_{modified_s3_relation2.id}_connection",
+                S3ConnectionInfo.from_s3_info(modified_s3_relation2.remote_app_data),
+            ),
+        ]
+
+    def test_removed_s3_relation_results_in_airflow_connection_deletion(
+        self,
+        context,
+        state,
+        all_required_relations,
+        s3_integrator_relation,
+        s3_integrator_relation2,
+        mock_command_executor,
+        mock_container_pull,
+        workload_container,
+    ):
+        """Ensure stale s3 airflow connections removed if corresponding relation removed."""
+        airflow_connections = [
+            {
+                "conn_id": f"s3_relation_{s3_integrator_relation.id}_connection",
+                "conn_type": "aws",
+                "login": "test-access-key",
+                "password": "test-secret-key",
+                "extra_dejson": {
+                    "region_name": "test-region",
+                    "endpoint_url": "test-endpoint",
+                },
+            },
+        ]
+
+        mock_container_pull.side_effect = [
+            io.StringIO("\n".join(json.loads(S3_INTEGRATOR_DATA["tls-ca-chain"]))),
+            # io.StringIO("\n".join(json.loads(S3_INTEGRATOR_DATA["tls-ca-chain"]))),
+        ]
+
+        mock_command_executor["list_airflow_connections"].side_effect = [
+            command_executor.CommandExecutionResult(
+                success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+            ),
+            command_executor.CommandExecutionResult(
+                success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
+            ),
+            command_executor.CommandExecutionResult(
+                success=True,
+                stdout=json.dumps(airflow_connections),
+                parsed_stdout=airflow_connections,
+                stderr="",
+                return_code=0,
+            ),
+            command_executor.CommandExecutionResult(
+                success=True,
+                stdout=json.dumps(airflow_connections),
+                parsed_stdout=airflow_connections,
+                stderr="",
+                return_code=0,
+            ),
+        ]
+
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{relation_id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                            "bucket_name": connection_info["bucket"],
+                            "prefix": connection_info["path"],
+                        },
+                    }
+                    for relation_id, connection_info in {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                    }.items()
+                ]
+            )
+
+        assert mock_command_executor["add_airflow_s3_connection"].call_count == 2
+        mock_command_executor["add_airflow_s3_connection"].reset_mock()
+
+        relations_with_removed_s3_relation = [
+            relation
+            for relation in all_required_relations
+            if relation.endpoint != constants.S3_ENDPOINT_NAME
+        ]
+        relations_with_removed_s3_relation.append(s3_integrator_relation)
+
+        state_modified = dataclasses.replace(
+            state, relations=relations_with_removed_s3_relation, containers=[workload_container]
+        )
+
+        # note: we're using update_status to trigger reconciler
+        # (due to an issue with object_storage charm lib emitting storage_connection_info_changed)
+        state_out = context.run(context.on.update_status(), state_modified)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            assert parsed.get("dag_processor", "dag_bundle_config_list") == json.dumps(
+                [
+                    {
+                        "name": f"s3_{s3_integrator_relation.id}_dag_bundle",
+                        "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                        "kwargs": {
+                            "aws_conn_id": f"s3_relation_{s3_integrator_relation.id}_connection",
+                            "bucket_name": s3_integrator_relation.remote_app_data["bucket"],
+                            "prefix": s3_integrator_relation.remote_app_data["path"],
+                        },
+                    },
+                ],
+            )
+
+        mock_command_executor["add_airflow_s3_connection"].assert_not_called()
+        mock_command_executor["delete_airflow_connection"].mock_calls == [
+            unittest.mock.call(f"s3_relation_{s3_integrator_relation2.id}_connection"),
+        ]
 
 
 def test_runtime_secrets_generated_and_stored_in_app_secret(

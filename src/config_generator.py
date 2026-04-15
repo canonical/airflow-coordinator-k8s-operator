@@ -5,6 +5,7 @@
 
 import configparser
 import io
+import json
 import logging
 import pathlib
 
@@ -152,6 +153,35 @@ class AirflowConfigGenerator:
             },
             "triggerer": {
                 "capacity": self._charm.config[constants.TRIGGERER_CAPACITY_CONFIG],
+            },
+        }
+
+    @property
+    def dag_processor_config(self) -> dict[str, dict[str, str]]:
+        """Return the DAG processor config as extra config sections.
+
+        Uses the same {section: {key: value}} pattern as executor config.
+        """
+        s3_dag_bundles = [
+            {
+                "name": f"s3_{relation_id}_dag_bundle",
+                "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+                "kwargs": {
+                    "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                    "bucket_name": connection_info.bucket,
+                    "prefix": connection_info.path,
+                },
+            }
+            for relation_id, connection_info in self._charm.s3_connections.items()
+            if connection_info
+        ]
+
+        if not s3_dag_bundles:
+            return {}
+
+        return {
+            "dag_processor": {
+                "dag_bundle_config_list": json.dumps(s3_dag_bundles),
             },
         }
 

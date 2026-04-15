@@ -61,6 +61,8 @@ requires:
   airflow-kubernetes-executor-config:
     interface: airflow_kubernetes_executor
     limit: 1
+  s3:
+    interface: s3
 
 peers:
   coordinator-peers:
@@ -115,7 +117,7 @@ config:
       type: int
       default: 5
       description: |
-        Value for databse.sql_alchemy_pool_size in airflow.cfg file
+        Value for database.sql_alchemy_pool_size in airflow.cfg file
 
         The SQLAlchemy pool size is the maximum number of database connections in the pool.
         0 indicates no limit
