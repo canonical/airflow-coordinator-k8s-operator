@@ -4,6 +4,7 @@
 import logging
 import unittest.mock
 
+import cryptography.fernet
 import ops.testing
 import pytest
 
@@ -271,9 +272,27 @@ def mock_command_executor():
 
 
 @pytest.fixture(scope="function")
-def state(all_required_relations, workload_container, mock_command_executor):
+def fernet_key():
+    return cryptography.fernet.Fernet.generate_key().decode()
+
+
+@pytest.fixture(scope="function")
+def fernet_key_secret(fernet_key):
+    return ops.testing.Secret(
+        {
+            constants.FERNET_KEY: fernet_key,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def state(all_required_relations, workload_container, mock_command_executor, fernet_key_secret):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
         containers=[workload_container],
+        secrets=[fernet_key_secret],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
     )

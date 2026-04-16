@@ -38,6 +38,9 @@ AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
 )
+MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
+INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
+MISSING_FERNET_KEY_IN_SECRET_MESSAGE = "Missing fernet key in secret"
 
 CORE_DEFAULT_TIMEZONE_CONFIG = "core_default_timezone"
 CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG = "core_max_active_runs_per_dag"
@@ -53,3 +56,6 @@ ISSUE_QUERYING_DATABASE_MESSAGE = "Issue querying Airflow database. Will retry..
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+
+FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
+FERNET_KEY = "fernet-key"

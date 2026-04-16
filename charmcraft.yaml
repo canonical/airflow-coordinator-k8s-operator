@@ -70,6 +70,11 @@ peers:
 
 config:
   options:
+    fernet_key_secret:
+      type: secret
+      description: |
+        URI of secret with fernet key that Airflow should use to encrypt passwords
+        and variables before persisting in the metadata database.
     core_default_timezone:
       type: string
       default: utc

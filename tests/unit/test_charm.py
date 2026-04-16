@@ -59,6 +59,59 @@ def test_container_not_ready(
     assert state_out.unit_status == ops.WaitingStatus(constants.WAITING_FOR_CONTAINER_MESSAGE)
 
 
+def test_missing_fernet_key_secret_config(context, state):
+    """Test with missing fernet_key_secret config."""
+    config = state.config.copy()
+    config.pop(constants.FERNET_KEY_SECRET_CONFIG)
+
+    state = dataclasses.replace(state, config=config)
+
+    state_out = context.run(context.on.config_changed(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE
+    )
+
+    for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+        assert relation.local_app_data == {}
+
+
+@pytest.mark.parametrize("exception", [ops.SecretNotFoundError, ops.ModelError])
+def test_invalid_fernet_key_secret(context, state, exception):
+    """Test error while accessing the fernet key secret."""
+    with unittest.mock.patch("ops.Model.get_secret", side_effect=exception):
+        state_out = context.run(context.on.config_changed(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_FERNET_KEY_SECRET_MESSAGE
+        )
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert relation.local_app_data == {}
+
+
+def test_missing_fernet_key_in_secret(context, state):
+    """Test for missing fernet key in provided secret."""
+    empty_secret = ops.testing.Secret(
+        {
+            "key-except-fernet-key": "random-value",
+        }
+    )
+    config = state.config.copy()
+    config[constants.FERNET_KEY_SECRET_CONFIG] = empty_secret.id
+
+    state = dataclasses.replace(state, secrets=[empty_secret], config=config)
+
+    state_out = context.run(context.on.config_changed(), state)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.MISSING_FERNET_KEY_IN_SECRET_MESSAGE
+    )
+
+    for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+        assert relation.local_app_data == {}
+
+
 def test_missing_postgres_relation(
     context, state, all_required_relations, postgres_relation, mock_command_executor
 ):
@@ -291,6 +344,7 @@ def test_invalid_core_charm_workload_image_hash(
 
 def test_db_migration_does_not_run_on_state_true(
     context,
+    state,
     all_required_relations,
     mock_command_executor,
     workload_container,
@@ -304,21 +358,17 @@ def test_db_migration_does_not_run_on_state_true(
     relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(peer_relation_with_state)
 
+    state = dataclasses.replace(state, relations=relations)
+
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
             return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=relations,
-        )
-
         context.run(
             context.on.pebble_ready(workload_container),
-            state_in,
+            state,
         )
 
     mock_command_executor["run_db_migrate"].assert_not_called()
@@ -326,6 +376,7 @@ def test_db_migration_does_not_run_on_state_true(
 
 def test_db_migration_runs_on_state_false(
     context,
+    state,
     all_required_relations,
     mock_command_executor,
     workload_container,
@@ -339,15 +390,9 @@ def test_db_migration_runs_on_state_false(
             return_value="[core]\nexecutor = {{ executor | default('LocalExecutor') }}\n"
         ),
     ):
-        state_in = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=all_required_relations,
-        )
-
         context.run(
             context.on.pebble_ready(workload_container),
-            state_in,
+            state,
         )
 
     mock_command_executor["run_db_migrate"].assert_called_once()
@@ -817,7 +862,6 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
     assert constants.AIRFLOW_KEYS_SECRET in peer.local_app_data
     assert "secret_key" not in peer.local_app_data
     assert "jwt_secret" not in peer.local_app_data
-    assert "fernet_key" not in peer.local_app_data
 
     # Verify secret contents have expected lengths
     secret = [
@@ -825,13 +869,11 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
     ][0]
     assert len(secret.tracked_content["secret-key"]) == 64  # token_hex(32)
     assert len(secret.tracked_content["jwt-secret"]) == 64
-    assert len(secret.tracked_content["fernet-key"]) == 44  # Fernet key
 
     # Verify distributed config includes secret fields
     for relation in state_out.get_relations("airflow-coordinator"):
         config_template = relation.local_app_data["config-template"]
         assert "secret_key =" in config_template
-        assert "fernet_key =" in config_template
         assert "jwt_secret =" in config_template
 
         sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
@@ -839,12 +881,16 @@ def test_runtime_secrets_generated_and_stored_in_app_secret(
             state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
         )
         assert sensitive_data["api__secret_key"]
-        assert sensitive_data["core__fernet_key"]
         assert sensitive_data["api_auth__jwt_secret"]
 
 
 def test_runtime_secrets_reused_across_events(
-    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+    context,
+    state,
+    all_required_relations,
+    mock_command_executor,
+    workload_container,
+    peer_relation,
 ):
     """Verify the same application secret is reused on subsequent events."""
     with unittest.mock.patch(
@@ -855,11 +901,7 @@ def test_runtime_secrets_reused_across_events(
     ):
         state_out = context.run(
             context.on.pebble_ready(workload_container),
-            ops.testing.State(
-                leader=True,
-                relations=all_required_relations,
-                containers=[workload_container],
-            ),
+            state,
         )
 
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -877,6 +919,8 @@ def test_runtime_secrets_reused_across_events(
     relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(peer_with_secret_id)
 
+    state = dataclasses.replace(state, relations=relations, secrets=[*state.secrets, first_secret])
+
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
         new_callable=unittest.mock.PropertyMock(
@@ -885,12 +929,7 @@ def test_runtime_secrets_reused_across_events(
     ):
         state_out_2 = context.run(
             context.on.start(),
-            ops.testing.State(
-                leader=True,
-                relations=relations,
-                containers=[workload_container],
-                secrets=[first_secret],
-            ),
+            state,
         )
 
     peer_2 = state_out_2.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -903,17 +942,23 @@ def test_runtime_secrets_reused_across_events(
             state_out_2.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
         )
         assert sensitive_data["api__secret_key"]
-        assert sensitive_data["core__fernet_key"]
         assert sensitive_data["api_auth__jwt_secret"]
 
 
 def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
-    context, all_required_relations, mock_command_executor, workload_container, peer_relation
+    context,
+    state,
+    all_required_relations,
+    mock_command_executor,
+    workload_container,
+    peer_relation,
 ):
     """Verify runtime secret is created and only secret ID is stored in peer app data."""
     clean_peer = dataclasses.replace(peer_relation, local_app_data={})
     relations = [r for r in all_required_relations if r.endpoint != constants.PEER_RELATION_NAME]
     relations.append(clean_peer)
+
+    state = dataclasses.replace(state, relations=relations)
 
     with unittest.mock.patch(
         "config_generator.AirflowConfigGenerator.config_template",
@@ -923,11 +968,7 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
     ):
         state_out = context.run(
             context.on.pebble_ready(workload_container),
-            ops.testing.State(
-                leader=True,
-                relations=relations,
-                containers=[workload_container],
-            ),
+            state,
         )
 
     peer = state_out.get_relations(constants.PEER_RELATION_NAME)[0]
@@ -935,7 +976,6 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
     # No plaintext fields and secret ID present
     assert "secret_key" not in peer.local_app_data
     assert "jwt_secret" not in peer.local_app_data
-    assert "fernet_key" not in peer.local_app_data
     assert constants.AIRFLOW_KEYS_SECRET in peer.local_app_data
 
     # Secret content contains generated values
@@ -944,12 +984,10 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
     ][0]
     assert len(secret.tracked_content["secret-key"]) == 64
     assert len(secret.tracked_content["jwt-secret"]) == 64
-    assert len(secret.tracked_content["fernet-key"]) == 44
 
     for relation in state_out.get_relations("airflow-coordinator"):
         config_template = relation.local_app_data["config-template"]
         assert "secret_key =" in config_template
-        assert "fernet_key =" in config_template
         assert "jwt_secret =" in config_template
 
         sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
@@ -957,7 +995,6 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
             state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
         )
         assert sensitive_data["api__secret_key"]
-        assert sensitive_data["core__fernet_key"]
         assert sensitive_data["api_auth__jwt_secret"]
 
 
@@ -1063,6 +1100,7 @@ class TestKubernetesExecutorConfig:
     def test_kubernetes_executor_config_returns_none_when_relation_empty(
         self,
         context,
+        state,
         all_required_relations,
         kubernetes_executor_config_relation_empty,
         workload_container,
@@ -1070,11 +1108,6 @@ class TestKubernetesExecutorConfig:
     ):
         """Verify _kubernetes_executor_config returns None when relation has no data yet."""
         all_required_relations.append(kubernetes_executor_config_relation_empty)
-        state = ops.testing.State(
-            leader=True,
-            containers=[workload_container],
-            relations=all_required_relations,
-        )
 
         with context(context.on.start(), state) as manager:
             charm = manager.charm
@@ -1172,6 +1205,7 @@ class TestKubernetesExecutorConfig:
 
 def test_base_url_uses_ingress_path_when_available(
     context,
+    state,
     all_required_relations,
     airflow_api_server_requires_relation,
     workload_container,
@@ -1189,11 +1223,7 @@ def test_base_url_uses_ingress_path_when_available(
     all_required_relations.remove(airflow_api_server_requires_relation)
     all_required_relations.append(ingress_relation)
 
-    state = ops.testing.State(
-        leader=True,
-        relations=all_required_relations,
-        containers=[workload_container],
-    )
+    state = dataclasses.replace(state, relations=all_required_relations)
 
     state_out = context.run(context.on.start(), state)
     assert state_out.unit_status == ops.ActiveStatus()
