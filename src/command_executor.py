@@ -11,7 +11,7 @@ import typing
 import charms.git_integrator.v0.git as git
 import ops
 
-import charm
+import connection_manager
 import constants
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ class CommandExecutor:
     def add_airflow_s3_connection(
         self,
         connection_id: str,
-        connection_info: charm.S3ConnectionInfo,
+        connection_info: connection_manager.S3ConnectionInfo,
         tls_ca_chain_path: typing.Optional[str] = None,
     ) -> ops.pebble.ExecProcess:
         """Add/update Airflow S3 connection.

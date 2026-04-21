@@ -22,7 +22,8 @@ from conftest import (
 
 import command_executor
 import constants
-from charm import AirflowCoordinatorK8SOperatorCharm, S3ConnectionInfo
+from charm import AirflowCoordinatorK8SOperatorCharm
+from connection_manager import S3ConnectionInfo
 
 MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS = """[core]
 executor = {{ executor | default('LocalExecutor') }}
@@ -379,7 +380,7 @@ class TestDagBundles:
         state_out = context.run(context.on.start(), state)
 
         assert state_out.unit_status == ops.BlockedStatus(
-            constants.ISSUE_QUERYING_DATABASE_MESSAGE
+            constants.ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE
         )
 
     def test_invalid_data_from_s3_integrators(
@@ -1133,19 +1134,9 @@ class TestDagBundles:
                 success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
             ),
             command_executor.CommandExecutionResult(
-                success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
-            ),
-            command_executor.CommandExecutionResult(
                 success=True,
                 stdout=json.dumps(airflow_connections),
                 parsed_stdout=airflow_connections,
-                stderr="",
-                return_code=0,
-            ),
-            command_executor.CommandExecutionResult(
-                success=True,
-                stdout=json.dumps(airflow_connections),
-                parsed_stdout=airflow_connections[1:],
                 stderr="",
                 return_code=0,
             ),

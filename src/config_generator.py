@@ -126,7 +126,7 @@ class AirflowConfigGenerator:
                     "prefix": connection_info.path,
                 },
             }
-            for relation_id, connection_info in self._charm.s3_connections.items()
+            for relation_id, connection_info in self._charm.s3_relation_connections.items()
             if connection_info
         ]
 

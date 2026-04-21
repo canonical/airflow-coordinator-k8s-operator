@@ -10,8 +10,8 @@ import charms.git_integrator.v0.git as git
 import ops.pebble
 import pytest
 
-import charm
 import command_executor
+import connection_manager
 import constants
 
 
@@ -32,7 +32,7 @@ def executor(mock_container):
 @pytest.fixture
 def mock_s3_connection_info():
     """Mock S3ConnectionInfo instance."""
-    return charm.S3ConnectionInfo.from_s3_info(
+    return connection_manager.S3ConnectionInfo.from_s3_info(
         {
             "bucket": "test-bucket",
             "access-key": "test-access-key",
