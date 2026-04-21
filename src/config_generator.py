@@ -122,9 +122,6 @@ class AirflowConfigGenerator:
         Uses the same {section: {key: value}} pattern as executor config.
         """
         return {
-            "api": {
-                "enable_swagger_ui": False,
-            },
             "core": {
                 "default_timezone": self._charm.config[constants.CORE_DEFAULT_TIMEZONE_CONFIG],
                 "max_active_runs_per_dag": self._charm.config[
@@ -135,8 +132,6 @@ class AirflowConfigGenerator:
                 ],
                 "parallelism": self._charm.config[constants.CORE_PARALLELISM_CONFIG],
                 "default_impersonation": constants.WORKLOAD_USER,
-                "dagbag_import_error_tracebacks": False,
-                "check_migrations": False,
             },
             "dag_processor": {
                 "parsing_processes": self._charm.config[
@@ -147,9 +142,6 @@ class AirflowConfigGenerator:
                 "sql_alchemy_pool_size": self._charm.config[
                     constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG
                 ],
-            },
-            "scheduler": {
-                "enable_healthcheck": True,
             },
             "triggerer": {
                 "capacity": self._charm.config[constants.TRIGGERER_CAPACITY_CONFIG],
