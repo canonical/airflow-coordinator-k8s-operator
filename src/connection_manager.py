@@ -272,7 +272,7 @@ class AirflowConnectionManager:
                 self.refresh()
 
     def delete_stale_connections(self) -> None:
-        """Delete stale s3/git Airflow connections (those without relations)."""
+        """Delete stale S3/git Airflow connections (those without relations)."""
         if self.airflow_connections is None:
             return
 

@@ -292,8 +292,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return None
         return content.kubernetes_executor_pod_spec
 
-    def _perform_potential_s3_connection_checks(self) -> None:
-        """Checks validity of all present s3 connections."""
+    def _perform_dag_bundle_connection_checks(self) -> None:
+        """Check validity of all present S3/git relations."""
+        if not self._s3_requires.relations and not self._git_requires.relations:
+            return
+
         if self._s3_requires.relations:
             errorneous_relation_ids = [
                 str(relation.id)
@@ -310,8 +313,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     ops.BlockedStatus,
                 )
 
-    def _perform_potential_git_connection_checks(self) -> None:
-        """Checks validity of all present git connections."""
         if self._git_requires.relations:
             errorneous_relation_ids = [
                 str(relation.id)
@@ -390,8 +391,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
-        self._perform_potential_s3_connection_checks()
-        self._perform_potential_git_connection_checks()
+        self._perform_dag_bundle_connection_checks()
 
     def _reconcile_dag_bundle_remote_connections(self) -> None:
         """Create/delete necessary Airflow connections for DAG bundle remotes."""
