@@ -14,7 +14,6 @@ dependencies = [
     "pydantic>=1.0",
     "Jinja2>=3.1.6",
     "object-storage-charmlib>=0.1.0, <1.0.0",
-    "cryptography>=41.0",
     "mergedeep>=1.3.4",
 ]
 
@@ -32,12 +31,14 @@ unit = [
     "coverage[toml]",
     "ops[testing]",
     "pytest",
+    "cryptography>=41.0",
 ]
 # Dependencies of integration tests
 integration = [
     "jubilant",
     "pytest",
     "PyYAML",
+    "cryptography>=41.0",
 ]
 
 # Testing tools configuration
