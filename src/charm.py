@@ -9,10 +9,12 @@ import json
 import logging
 import secrets
 import typing
+import zoneinfo
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
+import mergedeep
 import object_storage
 import ops
 from cryptography.fernet import Fernet
@@ -319,6 +321,48 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return None
         return content.kubernetes_executor_pod_spec
 
+    @property
+    def _airflow_config_template(self) -> str:
+        """Airflow config template merged with additional runtime compiled configs."""
+        return self._config_generator.config_template_with_extra_config(
+            **mergedeep.merge(
+                {},
+                self._config_generator.api_server_uri_config,
+                self._config_generator.dag_bundle_config,
+                (self._kubernetes_executor_config or {}),
+                self._config_generator.coordinator_charm_core_config,
+            ),
+        )
+
+    def _validate_configs(self):
+        """Ensure validity of charm configurations."""
+        try:
+            timezone = self.config.get(constants.CORE_DEFAULT_TIMEZONE_CONFIG, "")
+
+            if timezone.lower() not in ["utc", "system"]:
+                zoneinfo.ZoneInfo(timezone)
+        except zoneinfo.ZoneInfoNotFoundError:
+            raise ExceptionWithStatusError(
+                constants.INVALID_CONFIG_MESSAGE.format(
+                    config_name=constants.CORE_DEFAULT_TIMEZONE_CONFIG
+                ),
+                ops.BlockedStatus,
+            )
+
+        for config, first_valid_value in [
+            (constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG, 0),
+            (constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG, 0),
+            (constants.CORE_PARALLELISM_CONFIG, 0),
+            (constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG, 0),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, 1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, 1),
+        ]:
+            if self.config[config] < first_valid_value:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_CONFIG_MESSAGE.format(config_name=config),
+                    ops.BlockedStatus,
+                )
+
     def _perform_potential_s3_connection_checks(self) -> None:
         """Checks validity of all present s3 connections."""
         if self._s3_requires.relations:
@@ -339,6 +383,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _perform_checks(self) -> None:
         """Checks to ensure the charm is able to generate and distribute configs."""
+        self._validate_configs()
+
         if not self._container.can_connect():
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
@@ -539,9 +585,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         airflow_coordinator.write_airflow_config(
             self._container,
             constants.AIRFLOW_CONFIG_PATH,
-            self._config_generator.config_template_with_extra_config(
-                **self._config_generator.api_server_config,
-            ),
+            self._airflow_config_template,
             {
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
@@ -582,11 +626,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # Right now we only have one extra, but in the future we can make decisions
             # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
-                self._config_generator.config_template_with_extra_config(
-                    **self._config_generator.api_server_config,
-                    **self._config_generator.dag_processor_config,
-                    **(self._kubernetes_executor_config or {}),
-                ),
+                self._airflow_config_template,
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
                 sensitive_data={
                     **self._config_generator.sensitive_config_values,
