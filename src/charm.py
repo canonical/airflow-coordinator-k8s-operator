@@ -4,16 +4,15 @@
 
 """The Airflow Coordinator charm application."""
 
-import dataclasses
 import json
 import logging
 import secrets
-import typing
 import zoneinfo
 
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
+import charms.git_integrator.v0.git as git
 import mergedeep
 import object_storage
 import ops
@@ -22,6 +21,7 @@ from ops.pebble import LayerDict
 
 import command_executor
 import config_generator
+import connection_manager
 import constants
 
 logger = logging.getLogger(__name__)
@@ -41,38 +41,6 @@ class ExceptionWithStatusError(Exception):
         return self.status_type(self.message)
 
 
-@dataclasses.dataclass
-class S3ConnectionInfo:
-    """S3 Connection Info extracted from object_storage lib."""
-
-    bucket: str
-    access_key: str
-    secret_key: str
-    region: typing.Optional[str] = None
-    storage_class: typing.Optional[str] = None
-    endpoint: typing.Optional[str] = None
-    path: typing.Optional[str] = None
-    s3_api_version: typing.Optional[str] = None
-    s3_uri_style: typing.Optional[str] = None
-    tls_ca_chain: list[str] = dataclasses.field(default_factory=list)
-    delete_older_than_days: typing.Optional[str] = None
-
-    @classmethod
-    def from_s3_info(cls, data: object_storage.domain.S3Info):
-        """Instantiate from typed dict (S3Info)."""
-        if not data:
-            return None
-
-        if not all(
-            data.get(required_key) for required_key in ["bucket", "access-key", "secret-key"]
-        ):
-            return None
-
-        normalized_data = {key.replace("-", "_"): value for key, value in data.items()}
-
-        return cls(**normalized_data)
-
-
 class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     """Charm the application."""
 
@@ -82,6 +50,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
         self._command_executor = command_executor.CommandExecutor(self._container)
+        self._connection_manager = connection_manager.AirflowConnectionManager(
+            self, self._container
+        )
 
         self._database_requires = data_interfaces_v0.DatabaseRequires(
             self,
@@ -100,6 +71,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             callback=self._reconcile,
         )
         self._s3_requires = object_storage.S3Requirer(self, constants.S3_ENDPOINT_NAME)
+
+        self._git_requires = git.GitRequires(self, constants.GIT_ENDPOINT_NAME, self._reconcile)
 
         self._kubernetes_executor_requires = airflow_coordinator.AirflowCoordinatorRequires(
             self,
@@ -242,7 +215,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         self._peer_application_data["db_migration_ran"] = str(value).lower()
 
     @property
-    def s3_connections(self) -> dict[int, S3ConnectionInfo]:
+    def s3_relation_connections(self) -> dict[int, connection_manager.S3ConnectionInfo]:
         """S3 connections for DAG bundles from related S3 integrator charms."""
         if not self._s3_requires.relations:
             return {}
@@ -255,12 +228,20 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             for relation in self._s3_requires.relations
             if relation
             and (
-                connection_info := S3ConnectionInfo.from_s3_info(
+                connection_info := connection_manager.S3ConnectionInfo.from_s3_info(
                     self._s3_requires.get_storage_connection_info(relation)
                 )
             )
             is not None
         }
+
+    @property
+    def git_relation_connections(self) -> dict[int, git.GitProviderModel]:
+        """Git connections for DAG bundles from relation git integrator charms."""
+        if not self._git_requires.relations:
+            return {}
+
+        return self._git_requires.get_git_connection_information()
 
     @property
     def s3_tls_ca_chains(self) -> dict[str, str]:
@@ -269,7 +250,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.TLS_CA_CHAIN_FILEPATH_TEMPLATE.format(
                 filename=f"s3_relation_{relation_id}_connection"
             ): tls_ca_chain
-            for relation_id, connection_info in self.s3_connections.items()
+            for relation_id, connection_info in self.s3_relation_connections.items()
             if (tls_ca_chain := "\n".join(connection_info.tls_ca_chain))
         }
 
@@ -363,20 +344,36 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     ops.BlockedStatus,
                 )
 
-    def _perform_potential_s3_connection_checks(self) -> None:
-        """Checks validity of all present s3 connections."""
+    def _perform_dag_bundle_connection_checks(self) -> None:
+        """Check validity of all present S3/git relations."""
         if self._s3_requires.relations:
-            errorneous_relation_ids = [
+            erroneous_relation_ids = [
                 str(relation.id)
                 for relation in self._s3_requires.relations
-                if relation.id not in self.s3_connections
+                if relation.id not in self.s3_relation_connections
                 and self._s3_requires.get_storage_connection_info(relation)
             ]
 
-            if errorneous_relation_ids:
+            if erroneous_relation_ids:
                 raise ExceptionWithStatusError(
                     constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
-                        relation_ids=", ".join(errorneous_relation_ids)
+                        relation_ids=", ".join(erroneous_relation_ids)
+                    ),
+                    ops.BlockedStatus,
+                )
+
+        if self._git_requires.relations:
+            erroneous_relation_ids = [
+                str(relation.id)
+                for relation in self._git_requires.relations
+                if relation.id not in self._git_requires.get_git_connection_information()
+                and relation.data[relation.app]
+            ]
+
+            if erroneous_relation_ids:
+                raise ExceptionWithStatusError(
+                    constants.INVALID_GIT_RELATIONS_MESSAGE_TEMPLATE.format(
+                        relation_ids=", ".join(erroneous_relation_ids)
                     ),
                     ops.BlockedStatus,
                 )
@@ -445,114 +442,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE, ops.BlockedStatus
             )
 
-        self._perform_potential_s3_connection_checks()
-
-    def _create_or_update_s3_connections(self) -> None:
-        """Create or update s3 connections that have changed."""
-        airflow_connections = self._command_executor.list_airflow_connections().parsed_stdout
-
-        if airflow_connections is None:
-            raise ExceptionWithStatusError(
-                constants.ISSUE_QUERYING_DATABASE_MESSAGE,
-                ops.BlockedStatus,
-            )
-
-        def _has_s3_connection_changed(
-            connection_id: str, connection_info: S3ConnectionInfo
-        ) -> bool:
-            """Helper to determine if an s3 connection's info has changed."""
-            filtered_airflow_connections = list(
-                filter(
-                    lambda connection: connection["conn_id"] == connection_id, airflow_connections
-                )
-            )
-
-            if not filtered_airflow_connections:
-                return True
-
-            airflow_connection = filtered_airflow_connections[0]
-
-            try:
-                tls_ca_chain = (
-                    self._container.pull(
-                        f"/{constants.AIRFLOW_HOME}/connection_certs/{connection_id}.pem",
-                        encoding="utf-8",
-                    ).read()
-                    if connection_info.tls_ca_chain
-                    else ""
-                )
-            except ops.pebble.PathError:
-                tls_ca_chain = ""
-
-            return not (
-                airflow_connection["conn_type"] == "aws"
-                and airflow_connection["login"] == connection_info.access_key
-                and airflow_connection["password"] == connection_info.secret_key
-                and airflow_connection["extra_dejson"].get("region_name") == connection_info.region
-                and airflow_connection["extra_dejson"].get("endpoint_url")
-                == connection_info.endpoint
-                and tls_ca_chain == "\n".join(connection_info.tls_ca_chain)
-            )
-
-        for relation_id, connection_info in self.s3_connections.items():
-            if not connection_info:
-                continue
-
-            connection_id = f"s3_relation_{relation_id}_connection"
-
-            if _has_s3_connection_changed(connection_id, connection_info):
-                logger.info(
-                    f"Connection info for {connection_id} changed. Updating Airflow connection"
-                )
-
-                if connection_info.tls_ca_chain:
-                    tls_ca_chain_path = constants.TLS_CA_CHAIN_FILEPATH_TEMPLATE.format(
-                        filename=connection_id
-                    )
-
-                    try:
-                        self._container.push(
-                            path=tls_ca_chain_path,
-                            source="\n".join(connection_info.tls_ca_chain),
-                            make_dirs=True,
-                            user=constants.WORKLOAD_USER,
-                            group=constants.WORKLOAD_GROUP,
-                        )
-                    except ops.pebble.PathError as e:
-                        logger.error(f"Unexpected error pushing TLS CA chain: {e}")
-                        raise ExceptionWithStatusError(f"Failed to push TLS CA chain: {e}") from e
-                else:
-                    tls_ca_chain_path = None
-
-                self._command_executor.add_airflow_s3_connection(
-                    connection_id,
-                    connection_info,
-                    tls_ca_chain_path=tls_ca_chain_path,
-                )
-
-    def _delete_stale_connections(self) -> None:
-        """Delete stale s3 connections (s3 connections without relations)."""
-        airflow_connections = self._command_executor.list_airflow_connections().parsed_stdout
-
-        if airflow_connections is None:
-            raise ExceptionWithStatusError(
-                constants.ISSUE_QUERYING_DATABASE_MESSAGE,
-                ops.BlockedStatus,
-            )
-
-        s3_relation_connection_ids = [
-            f"s3_relation_{relation_id}_connection" for relation_id in self.s3_connections
-        ]
-
-        for airflow_connection_id in [
-            connection["conn_id"]
-            for connection in airflow_connections
-            if connection["conn_id"].startswith("s3_relation_")
-        ]:
-            if airflow_connection_id not in s3_relation_connection_ids:
-                logger.info(f"Deleting Airflow connection {airflow_connection_id}")
-
-                self._command_executor.delete_airflow_connection(airflow_connection_id)
+        self._perform_dag_bundle_connection_checks()
 
     def _reconcile_dag_bundle_remote_connections(self) -> None:
         """Create/delete necessary Airflow connections for DAG bundle remotes."""
@@ -560,11 +450,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return
 
         try:
-            self._create_or_update_s3_connections()
-            self._delete_stale_connections()
-        except command_executor.CommandExecutionError:
+            self._connection_manager.delete_stale_connections()
+            self._connection_manager.create_or_update_s3_connections()
+            self._connection_manager.create_or_update_git_connections()
+        except (
+            command_executor.CommandExecutionError,
+            ops.pebble.PathError,
+            connection_manager.InvalidAirflowConnectionsError,
+        ):
             raise ExceptionWithStatusError(
-                "Internal issue of reconciling S3 airflow connections",
+                constants.ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE,
                 ops.BlockedStatus,
             )
 
@@ -634,6 +529,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 },
                 tls_ca_chains=self.s3_tls_ca_chains,
             )
+
         except ExceptionWithStatusError as e:
             logger.error(e)
             self.unit.status = e.status
