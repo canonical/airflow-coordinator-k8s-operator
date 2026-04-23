@@ -1060,6 +1060,7 @@ class TestAirflowConfigurability:
             assert parsed["core"]["dagbag_import_error_tracebacks"] == "False"
             assert parsed["core"]["check_migrations"] == "False"
             assert parsed["core"]["load_examples"] == "False"
+            assert parsed["core"]["default_impersonation"] == "ubuntu"
 
             assert parsed["scheduler"]["enable_healthcheck"] == "True"
 

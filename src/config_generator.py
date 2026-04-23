@@ -128,7 +128,6 @@ class AirflowConfigGenerator:
                     constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG
                 ],
                 "parallelism": self._charm.config[constants.CORE_PARALLELISM_CONFIG],
-                "default_impersonation": constants.WORKLOAD_USER,
             },
             "dag_processor": {
                 "parsing_processes": self._charm.config[
