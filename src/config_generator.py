@@ -97,7 +97,7 @@ class AirflowConfigGenerator:
         return output.getvalue()
 
     @property
-    def api_server_config(self) -> dict[str, dict[str, str]]:
+    def api_server_uri_config(self) -> dict[str, dict[str, str]]:
         """Return the API server config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.
@@ -113,11 +113,8 @@ class AirflowConfigGenerator:
         }
 
     @property
-    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | bool]]:
+    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | int]]:
         """Return the Airflow core config extracted from this charm's juju config.
-
-        This property also updates changes values of certain Airflow configurations
-        (those options that are not dynamically set to charm config values).
 
         Uses the same {section: {key: value}} pattern as executor config.
         """
@@ -149,7 +146,7 @@ class AirflowConfigGenerator:
         }
 
     @property
-    def dag_processor_config(self) -> dict[str, dict[str, str]]:
+    def dag_bundle_config(self) -> dict[str, dict[str, str]]:
         """Return the DAG processor config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.

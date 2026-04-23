@@ -962,22 +962,35 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
 
 
 class TestAirflowConfigurability:
-    def test_negative_value_configs(self, context, state, mock_command_executor):
+    @pytest.mark.parametrize(
+        "config_option_values",
+        [
+            (constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG, -1),
+            (constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG, -1),
+            (constants.CORE_PARALLELISM_CONFIG, -1),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, 0),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, -1),
+            (constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG, -1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, -1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, 0),
+        ],
+    )
+    def test_negative_value_configs(
+        self, context, state, mock_command_executor, config_option_values
+    ):
         """Ensure negative values integer configs are not accepted."""
         state = dataclasses.replace(
             state,
             config={
                 **state.config,
-                constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG: -1,
+                config_option_values[0]: config_option_values[1],
             },
         )
 
         state_out = context.run(context.on.config_changed(), state)
 
         assert state_out.unit_status == ops.BlockedStatus(
-            constants.INVALID_CONFIG_MESSAGE.format(
-                config_name=constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG
-            )
+            constants.INVALID_CONFIG_MESSAGE.format(config_name=config_option_values[0])
         )
 
     def test_invalid_timezone_config(self, context, state, mock_command_executor):

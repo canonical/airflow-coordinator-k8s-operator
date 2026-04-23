@@ -321,11 +321,21 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return None
         return content.kubernetes_executor_pod_spec
 
+    @property
+    def _airflow_config_template(self) -> str:
+        """Airflow config template merged with additional runtime compiled configs."""
+        return self._config_generator.config_template_with_extra_config(
+            **mergedeep.merge(
+                {},
+                self._config_generator.api_server_uri_config,
+                self._config_generator.dag_bundle_config,
+                (self._kubernetes_executor_config or {}),
+                self._config_generator.coordinator_charm_core_config,
+            ),
+        )
+
     def _validate_configs(self):
         """Ensure validity of charm configurations."""
-        if not self.config:
-            return
-
         try:
             timezone = self.config.get(constants.CORE_DEFAULT_TIMEZONE_CONFIG, "")
 
@@ -339,15 +349,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 ops.BlockedStatus,
             )
 
-        for config in [
-            constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG,
-            constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG,
-            constants.CORE_PARALLELISM_CONFIG,
-            constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG,
-            constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG,
-            constants.TRIGGERER_CAPACITY_CONFIG,
+        for config, first_valid_value in [
+            (constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG, 0),
+            (constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG, 0),
+            (constants.CORE_PARALLELISM_CONFIG, 0),
+            (constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG, 0),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, 1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, 1),
         ]:
-            if self.config[config] < 0:
+            if self.config[config] < first_valid_value:
                 raise ExceptionWithStatusError(
                     constants.INVALID_CONFIG_MESSAGE.format(config_name=config),
                     ops.BlockedStatus,
@@ -575,9 +585,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         airflow_coordinator.write_airflow_config(
             self._container,
             constants.AIRFLOW_CONFIG_PATH,
-            self._config_generator.config_template_with_extra_config(
-                **self._config_generator.api_server_config,
-            ),
+            self._airflow_config_template,
             {
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
@@ -618,14 +626,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # Right now we only have one extra, but in the future we can make decisions
             # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
-                self._config_generator.config_template_with_extra_config(
-                    **mergedeep.merge(
-                        self._config_generator.api_server_config,
-                        self._config_generator.dag_processor_config,
-                        (self._kubernetes_executor_config or {}),
-                        self._config_generator.coordinator_charm_core_config,
-                    ),
-                ),
+                self._airflow_config_template,
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
                 sensitive_data={
                     **self._config_generator.sensitive_config_values,
