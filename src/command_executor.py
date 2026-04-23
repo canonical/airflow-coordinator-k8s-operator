@@ -198,7 +198,7 @@ class CommandExecutor:
         connection_id: str,
         git_provider_model: git.GitProviderModel,
     ) -> ops.pebble.ExecProcess:
-        """Add/update Airflow S3 connection.
+        """Add/update Airflow git connection.
 
         The 'airflow connections add' creates or updates an existing connection.
 

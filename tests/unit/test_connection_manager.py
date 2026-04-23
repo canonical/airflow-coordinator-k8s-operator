@@ -253,30 +253,30 @@ class TestConnectionManager:
                 mock_container_push.assert_not_called()
                 mock_command_executor["add_airflow_s3_connection"].assert_not_called()
 
-    def test_has_connection_for_git_changed_new_connection(
+    def test_has_connection_for_git_with_changed_new_connection(
         self,
         airflow_connection_manager,
         empty_list_airflow_connections_output,
         valid_git_provider_model,
     ):
         assert airflow_connection_manager.has_connection_for_git_changed(
-            "git_relation_1_connection", valid_git_provider_model
+            "git_relation_2_connection", valid_git_provider_model
         )
 
-    def test_has_connection_for_git_changed_password(
+    def test_has_connection_for_git_with_changed_password(
         self,
         airflow_connection_manager,
         valid_list_airflow_connections_output,
         valid_git_provider_model,
     ):
-        assert airflow_connection_manager.has_connection_for_git_changed(
-            "git_relation_1_connection", valid_s3_connection_info
+        assert not airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_2_connection", valid_git_provider_model
         )
 
-        valid_git_provider_model.password = "new-test-password"
+        valid_git_provider_model.credentials_personal_access_token = "new-test-password"
 
-        assert not airflow_connection_manager.has_connection_for_git_changed(
-            "s3_relation_1_connection", valid_s3_connection_info
+        assert airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_2_connection", valid_git_provider_model
         )
 
     @pytest.mark.parametrize(

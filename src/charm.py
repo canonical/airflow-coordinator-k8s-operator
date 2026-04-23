@@ -236,6 +236,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         }
 
     @property
+    def git_relation_connections(self) -> dict[int, git.GitProviderModel]:
+        """Git connections for DAG bundles from relation git integrator charms."""
+        if not self._git_requires.relations:
+            return {}
+
+        return self._git_requires.get_git_connection_information()
+
+    @property
     def s3_tls_ca_chains(self) -> dict[str, str]:
         """TLS CA chain paths for S3 connections."""
         return {
@@ -338,37 +346,34 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _perform_dag_bundle_connection_checks(self) -> None:
         """Check validity of all present S3/git relations."""
-        if not self._s3_requires.relations and not self._git_requires.relations:
-            return
-
         if self._s3_requires.relations:
-            errorneous_relation_ids = [
+            erroneous_relation_ids = [
                 str(relation.id)
                 for relation in self._s3_requires.relations
                 if relation.id not in self.s3_relation_connections
                 and self._s3_requires.get_storage_connection_info(relation)
             ]
 
-            if errorneous_relation_ids:
+            if erroneous_relation_ids:
                 raise ExceptionWithStatusError(
                     constants.INVALID_S3_RELATIONS_MESSAGE_TEMPLATE.format(
-                        relation_ids=", ".join(errorneous_relation_ids)
+                        relation_ids=", ".join(erroneous_relation_ids)
                     ),
                     ops.BlockedStatus,
                 )
 
         if self._git_requires.relations:
-            errorneous_relation_ids = [
+            erroneous_relation_ids = [
                 str(relation.id)
                 for relation in self._git_requires.relations
                 if relation.id not in self._git_requires.get_git_connection_information()
                 and relation.data[relation.app]
             ]
 
-            if errorneous_relation_ids:
+            if erroneous_relation_ids:
                 raise ExceptionWithStatusError(
                     constants.INVALID_GIT_RELATIONS_MESSAGE_TEMPLATE.format(
-                        relation_ids=", ".join(errorneous_relation_ids)
+                        relation_ids=", ".join(erroneous_relation_ids)
                     ),
                     ops.BlockedStatus,
                 )

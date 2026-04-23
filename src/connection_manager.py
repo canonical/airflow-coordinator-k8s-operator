@@ -265,9 +265,6 @@ class AirflowConnectionManager:
 
     def delete_stale_connections(self) -> None:
         """Delete stale S3/git Airflow connections (those without relations)."""
-        if self.airflow_connections is None:
-            return
-
         s3_relation_connection_ids = [
             f"s3_relation_{relation_id}_connection"
             for relation_id in self._charm.s3_relation_connections
@@ -275,7 +272,7 @@ class AirflowConnectionManager:
 
         git_relation_connection_ids = [
             f"git_relation_{relation_id}_connection"
-            for relation_id in self._charm._git_requires.get_git_connection_information()
+            for relation_id in self._charm.git_relation_connections
         ]
 
         for airflow_connection_id in [
