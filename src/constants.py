@@ -44,5 +44,15 @@ ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE = (
     "Internal issue while reconciling S3/git Airflow connections"
 )
 
+CORE_DEFAULT_TIMEZONE_CONFIG = "core_default_timezone"
+CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG = "core_max_active_runs_per_dag"
+CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG = "core_max_active_tasks_per_dag"
+CORE_PARALLELISM_CONFIG = "core_parallelism"
+DAG_PROCESSOR_PARSING_PROCESSES_CONFIG = "dag_processor_parsing_processes"
+DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG = "database_sql_alchemy_pool_size"
+TRIGGERER_CAPACITY_CONFIG = "triggerer_capacity"
+
+INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
+
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"

@@ -14,6 +14,7 @@ import charms.git_integrator.v0.git as git
 import ops
 
 import connection_manager
+import constants
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ class AirflowConfigGenerator:
         return output.getvalue()
 
     @property
-    def api_server_config(self) -> dict[str, dict[str, str]]:
+    def api_server_uri_config(self) -> dict[str, dict[str, str]]:
         """Return the API server config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.
@@ -152,7 +153,39 @@ class AirflowConfigGenerator:
         }
 
     @property
-    def dag_processor_config(self) -> dict[str, dict[str, str]]:
+    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | int]]:
+        """Return the Airflow core config extracted from this charm's juju config.
+
+        Uses the same {section: {key: value}} pattern as executor config.
+        """
+        return {
+            "core": {
+                "default_timezone": self._charm.config[constants.CORE_DEFAULT_TIMEZONE_CONFIG],
+                "max_active_runs_per_dag": self._charm.config[
+                    constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG
+                ],
+                "max_active_tasks_per_dag": self._charm.config[
+                    constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG
+                ],
+                "parallelism": self._charm.config[constants.CORE_PARALLELISM_CONFIG],
+            },
+            "dag_processor": {
+                "parsing_processes": self._charm.config[
+                    constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG
+                ],
+            },
+            "database": {
+                "sql_alchemy_pool_size": self._charm.config[
+                    constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG
+                ],
+            },
+            "triggerer": {
+                "capacity": self._charm.config[constants.TRIGGERER_CAPACITY_CONFIG],
+            },
+        }
+
+    @property
+    def dag_bundle_config(self) -> dict[str, dict[str, str]]:
         """Return the DAG processor config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.

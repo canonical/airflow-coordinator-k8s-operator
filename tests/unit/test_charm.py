@@ -14,6 +14,7 @@ import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordina
 import charms.git_integrator.v0.git as git
 import ops
 import ops.testing
+import pytest
 from conftest import (
     MOCK_KUBERNETES_EXECUTOR_CONFIG,
     MOCK_KUBERNETES_EXECUTOR_POD_SPEC,
@@ -1398,6 +1399,110 @@ def test_runtime_secret_created_when_peer_has_no_plaintext_fields(
         assert sensitive_data["api__secret_key"]
         assert sensitive_data["core__fernet_key"]
         assert sensitive_data["api_auth__jwt_secret"]
+
+
+class TestAirflowConfigurability:
+    @pytest.mark.parametrize(
+        "config_option_values",
+        [
+            (constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG, -1),
+            (constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG, -1),
+            (constants.CORE_PARALLELISM_CONFIG, -1),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, 0),
+            (constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG, -1),
+            (constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG, -1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, -1),
+            (constants.TRIGGERER_CAPACITY_CONFIG, 0),
+        ],
+    )
+    def test_negative_value_configs(
+        self, context, state, mock_command_executor, config_option_values
+    ):
+        """Ensure negative values integer configs are not accepted."""
+        state = dataclasses.replace(
+            state,
+            config={
+                **state.config,
+                config_option_values[0]: config_option_values[1],
+            },
+        )
+
+        state_out = context.run(context.on.config_changed(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_CONFIG_MESSAGE.format(config_name=config_option_values[0])
+        )
+
+    def test_invalid_timezone_config(self, context, state, mock_command_executor):
+        """Ensure invalid timezone configs are not accepted."""
+        state = dataclasses.replace(
+            state,
+            config={
+                **state.config,
+                constants.CORE_DEFAULT_TIMEZONE_CONFIG: "invalid",
+            },
+        )
+
+        state_out = context.run(context.on.config_changed(), state)
+
+        assert state_out.unit_status == ops.BlockedStatus(
+            constants.INVALID_CONFIG_MESSAGE.format(
+                config_name=constants.CORE_DEFAULT_TIMEZONE_CONFIG
+            )
+        )
+
+    @pytest.mark.parametrize("valid_timezone", ["utc", "system", "America/New_York"])
+    def test_valid_configs_update_airflow_cfg(
+        self, context, state, mock_command_executor, valid_timezone
+    ):
+        """Ensure properly specified configs are accepted."""
+        airflow_configs = {
+            constants.CORE_DEFAULT_TIMEZONE_CONFIG: valid_timezone,
+            constants.CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG: 6,
+            constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG: 6,
+            constants.CORE_PARALLELISM_CONFIG: 6,
+            constants.DAG_PROCESSOR_PARSING_PROCESSES_CONFIG: 6,
+            constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG: 6,
+            constants.TRIGGERER_CAPACITY_CONFIG: 6,
+        }
+        state = dataclasses.replace(
+            state,
+            config={
+                **state.config,
+                **airflow_configs,
+            },
+        )
+
+        state_out = context.run(context.on.config_changed(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations("airflow-coordinator"):
+            config_template = relation.local_app_data.get("config-template", "")
+            parsed = configparser.ConfigParser()
+            parsed.read_string(config_template)
+
+            # Ensure config options propagate to airflow.cfg
+            assert parsed["core"]["default_timezone"] == valid_timezone
+            assert parsed["core"]["max_active_runs_per_dag"] == "6"
+            assert parsed["core"]["max_active_tasks_per_dag"] == "6"
+            assert parsed["core"]["parallelism"] == "6"
+
+            assert parsed["dag_processor"]["parsing_processes"] == "6"
+
+            assert parsed["database"]["sql_alchemy_pool_size"] == "6"
+
+            assert parsed["triggerer"]["capacity"] == "6"
+
+            # Ensure configs with updated default propagate to airflow.cfg
+            assert parsed["api"]["enable_swagger_ui"] == "False"
+
+            assert parsed["core"]["dagbag_import_error_tracebacks"] == "False"
+            assert parsed["core"]["check_migrations"] == "False"
+            assert parsed["core"]["load_examples"] == "False"
+            assert parsed["core"]["default_impersonation"] == "ubuntu"
+
+            assert parsed["scheduler"]["enable_healthcheck"] == "True"
 
 
 class TestKubernetesExecutorConfig:
