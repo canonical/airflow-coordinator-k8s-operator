@@ -18,7 +18,7 @@ import constants
 logger = logging.getLogger(__name__)
 
 
-class MissingAirflowConnectionsError(Exception):
+class InvalidAirflowConnectionsError(Exception):
     """Custom exception raised when `airflow connections list` output is invalid."""
 
 
@@ -42,7 +42,7 @@ class AirflowConnection:
             return []
 
         if not all(connection.get("conn_type") for connection in data):
-            return None
+            raise InvalidAirflowConnectionsError()
 
         return [
             cls(**{key.replace("-", "_"): value for key, value in datum.items()}) for datum in data
@@ -94,7 +94,7 @@ class AirflowConnectionManager:
         raw_connections = self._charm._command_executor.list_airflow_connections().parsed_stdout
 
         if raw_connections is None:
-            raise MissingAirflowConnectionsError()
+            raise InvalidAirflowConnectionsError()
 
         return AirflowConnection.from_airflow_connections_list_output(raw_connections)
 
@@ -103,21 +103,13 @@ class AirflowConnectionManager:
 
         Must be run to ensure re-fetch/re-compute of cached data.
         """
-        del self.__dict__["airflow_connections"]
-
-    def get_airflow_connections_by_type(self, type: str) -> list[dict]:
-        """Airflow connections of a specific type from the database.
-
-        Examples of specified type can be "aws" and "git".
-        """
-        return list(
-            filter(lambda connection: connection["conn_type"] == type, self.airflow_connections)
-        )
+        if "airflow_connections" in self.__dict__:
+            del self.__dict__["airflow_connections"]
 
     def has_connection_for_s3_changed(
         self, connection_id: str, connection_info: S3ConnectionInfo
     ) -> bool:
-        """Validator for change of Airflow AWS connection compared to S3 relation data."""
+        """Return True if S3 connection relation data has changed; False otherwise."""
         filtered_airflow_connections = list(
             filter(
                 lambda connection: connection.conn_id == connection_id, self.airflow_connections
@@ -193,7 +185,7 @@ class AirflowConnectionManager:
     def has_connection_for_git_changed(
         self, connection_id: str, git_provider_model: git.GitProviderModel
     ) -> bool:
-        """Validator for change of Airflow git connection compared to git relation data."""
+        """Return True if git connection relation data has changed; False otherwise."""
         filtered_airflow_connections = list(
             filter(
                 lambda connection: connection.conn_id == connection_id, self.airflow_connections
@@ -214,8 +206,8 @@ class AirflowConnectionManager:
             has_authentication_changed = (
                 airflow_connection.extra_dejson.get("private_key")
                 or airflow_connection.extra_dejson.get("strict_host_key_checking")
-                or airflow_connection.get.login != git_provider_model.credentials_username
-                or airflow_connection.get.password
+                or airflow_connection.login != git_provider_model.credentials_username
+                or airflow_connection.password
                 != git_provider_model.credentials_personal_access_token
             )
         elif git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
@@ -260,7 +252,7 @@ class AirflowConnectionManager:
                 )
 
                 if connection_id in airflow_connection_ids:
-                    self._command_executor.delete_airflow_connection(connection_id)
+                    self._charm._command_executor.delete_airflow_connection(connection_id)
 
                 logger.info(f"Adding new Airflow connection for {connection_id}")
 

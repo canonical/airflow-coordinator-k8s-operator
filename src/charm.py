@@ -405,7 +405,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         except (
             command_executor.CommandExecutionError,
             ops.pebble.PathError,
-            connection_manager.MissingAirflowConnectionsError,
+            connection_manager.InvalidAirflowConnectionsError,
         ):
             raise ExceptionWithStatusError(
                 constants.ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE,

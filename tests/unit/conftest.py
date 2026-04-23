@@ -357,6 +357,15 @@ def mock_container_pull():
         yield mock_pull
 
 
+@pytest.fixture
+def mock_container_push():
+    """Mock the pebble.Container.push method."""
+    with unittest.mock.patch(
+        "ops.Container.push",
+    ) as mock_push:
+        yield mock_push
+
+
 @pytest.fixture(scope="function")
 def mock_command_executor():
     """Mock the command executor to avoid actual container operations."""
