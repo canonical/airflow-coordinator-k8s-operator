@@ -6,6 +6,7 @@
 AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
 S3_ENDPOINT_NAME = "s3"
+GIT_ENDPOINT_NAME = "git"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
@@ -33,6 +34,7 @@ MISMATCHED_AIRFLOW_VERSIONS_MESSAGE = "Integrated apps with mismatched airflow v
 MISMATCHED_WORKLOAD_IMAGE_HASHES_MESSAGE = "Integrated apps with mismatched workload image hashes"
 MISSING_INTEGRATIONS_MESSAGE_TEMPLATE = "Missing integrations with: {missing_core_components}"
 INVALID_S3_RELATIONS_MESSAGE_TEMPLATE = "Invalid S3 relations: {relation_ids}"
+INVALID_GIT_RELATIONS_MESSAGE_TEMPLATE = "Invalid git relations: {relation_ids}"
 AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow keys"
 AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
@@ -41,6 +43,9 @@ WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
 INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
 MISSING_FERNET_KEY_IN_SECRET_MESSAGE = "Missing fernet key in secret"
+ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE = (
+    "Internal issue while reconciling S3/git Airflow connections"
+)
 
 CORE_DEFAULT_TIMEZONE_CONFIG = "core_default_timezone"
 CORE_MAX_ACTIVE_RUNS_PER_DAG_CONFIG = "core_max_active_runs_per_dag"
@@ -51,8 +56,6 @@ DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG = "database_sql_alchemy_pool_size"
 TRIGGERER_CAPACITY_CONFIG = "triggerer_capacity"
 
 INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
-
-ISSUE_QUERYING_DATABASE_MESSAGE = "Issue querying Airflow database. Will retry..."
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"

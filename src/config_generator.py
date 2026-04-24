@@ -8,9 +8,12 @@ import io
 import json
 import logging
 import pathlib
+import typing
 
+import charms.git_integrator.v0.git as git
 import ops
 
+import connection_manager
 import constants
 
 logger = logging.getLogger(__name__)
@@ -97,7 +100,7 @@ class AirflowConfigGenerator:
         return output.getvalue()
 
     @property
-    def api_server_config(self) -> dict[str, dict[str, str]]:
+    def api_server_uri_config(self) -> dict[str, dict[str, str]]:
         """Return the API server config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.
@@ -112,19 +115,50 @@ class AirflowConfigGenerator:
             },
         }
 
-    @property
-    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | bool]]:
-        """Return the Airflow core config extracted from this charm's juju config.
+    def _dag_bundle_for_s3_connection(
+        self, relation_id: int, s3_connection_info: connection_manager.S3ConnectionInfo
+    ) -> typing.Optional[dict]:
+        """Generate DAG bundle config dict for provided S3 connection."""
+        if not s3_connection_info:
+            return None
 
-        This property also updates changes values of certain Airflow configurations
-        (those options that are not dynamically set to charm config values).
+        return {
+            "name": f"s3_{relation_id}_dag_bundle",
+            "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
+            "kwargs": {
+                "aws_conn_id": f"s3_relation_{relation_id}_connection",
+                "bucket_name": s3_connection_info.bucket,
+                "prefix": s3_connection_info.path,
+            },
+        }
+
+    def _dag_bundle_for_git_connection(
+        self, relation_id: int, git_provider_model: git.GitProviderModel
+    ) -> typing.Optional[dict]:
+        git_dag_bundle_kwargs = {
+            "repo_url": git_provider_model.repository_url,
+            "tracking_ref": git_provider_model.tracking_ref,
+            "subdir": git_provider_model.path,
+            "submodules": False,
+            "prune_dotgit_folder": True,
+        }
+
+        if git_provider_model.authentication_method:
+            git_dag_bundle_kwargs["git_conn_id"] = f"git_relation_{relation_id}_connection"
+
+        return {
+            "name": f"git_{relation_id}_dag_bundle",
+            "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
+            "kwargs": git_dag_bundle_kwargs,
+        }
+
+    @property
+    def coordinator_charm_core_config(self) -> dict[str, dict[str, str | int]]:
+        """Return the Airflow core config extracted from this charm's juju config.
 
         Uses the same {section: {key: value}} pattern as executor config.
         """
         return {
-            "api": {
-                "enable_swagger_ui": False,
-            },
             "core": {
                 "default_timezone": self._charm.config[constants.CORE_DEFAULT_TIMEZONE_CONFIG],
                 "max_active_runs_per_dag": self._charm.config[
@@ -134,9 +168,6 @@ class AirflowConfigGenerator:
                     constants.CORE_MAX_ACTIVE_TASKS_PER_DAG_CONFIG
                 ],
                 "parallelism": self._charm.config[constants.CORE_PARALLELISM_CONFIG],
-                "default_impersonation": constants.WORKLOAD_USER,
-                "dagbag_import_error_tracebacks": False,
-                "check_migrations": False,
             },
             "dag_processor": {
                 "parsing_processes": self._charm.config[
@@ -148,41 +179,40 @@ class AirflowConfigGenerator:
                     constants.DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG
                 ],
             },
-            "scheduler": {
-                "enable_healthcheck": True,
-            },
             "triggerer": {
                 "capacity": self._charm.config[constants.TRIGGERER_CAPACITY_CONFIG],
             },
         }
 
     @property
-    def dag_processor_config(self) -> dict[str, dict[str, str]]:
+    def dag_bundle_config(self) -> dict[str, dict[str, str]]:
         """Return the DAG processor config as extra config sections.
 
         Uses the same {section: {key: value}} pattern as executor config.
         """
         s3_dag_bundles = [
-            {
-                "name": f"s3_{relation_id}_dag_bundle",
-                "classpath": "airflow.providers.amazon.aws.bundles.s3.S3DagBundle",
-                "kwargs": {
-                    "aws_conn_id": f"s3_relation_{relation_id}_connection",
-                    "bucket_name": connection_info.bucket,
-                    "prefix": connection_info.path,
-                },
-            }
-            for relation_id, connection_info in self._charm.s3_connections.items()
-            if connection_info
+            dag_bundle_config
+            for relation_id, s3_connection_info in self._charm.s3_relation_connections.items()
+            if (
+                dag_bundle_config := self._dag_bundle_for_s3_connection(
+                    relation_id, s3_connection_info
+                )
+            )
         ]
 
-        if not s3_dag_bundles:
+        git_dag_bundles = [
+            self._dag_bundle_for_git_connection(relation_id, git_provider_model)
+            for relation_id, git_provider_model in self._charm._git_requires.get_git_connection_information().items()  # noqa: E501
+        ]
+
+        if not s3_dag_bundles and not git_dag_bundles:
             return {}
 
         return {
             "dag_processor": {
                 "dag_bundle_config_list": json.dumps(
-                    sorted(s3_dag_bundles, key=lambda bundle: bundle["name"])
+                    s3_dag_bundles + git_dag_bundles,
+                    indent=4,
                 ),
             },
         }

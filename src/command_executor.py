@@ -8,9 +8,10 @@ import json
 import logging
 import typing
 
+import charms.git_integrator.v0.git as git
 import ops
 
-import charm
+import connection_manager
 import constants
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ class CommandExecutor:
     def add_airflow_s3_connection(
         self,
         connection_id: str,
-        connection_info: charm.S3ConnectionInfo,
+        connection_info: connection_manager.S3ConnectionInfo,
         tls_ca_chain_path: typing.Optional[str] = None,
     ) -> ops.pebble.ExecProcess:
         """Add/update Airflow S3 connection.
@@ -184,6 +185,59 @@ class CommandExecutor:
         """List all Airflow connections."""
         return self._container.exec(
             ["airflow", "connections", "list", "--output", "json"],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
+        )
+
+    @execute_pebble_exec_process
+    def add_airflow_git_connection(
+        self,
+        connection_id: str,
+        git_provider_model: git.GitProviderModel,
+    ) -> ops.pebble.ExecProcess:
+        """Add/update Airflow git connection.
+
+        The 'airflow connections add' creates or updates an existing connection.
+
+        """
+        extras = {}
+        if git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
+            extras["private_key"] = git_provider_model.ssh_private_key
+
+            if git_provider_model.ssh_strict_host_key_checking is not None:
+                extras["strict_host_key_checking"] = (
+                    git_provider_model.ssh_strict_host_key_checking
+                )
+
+        extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
+
+        credentials_options = (
+            [
+                "--conn-login",
+                git_provider_model.credentials_username,
+                "--conn-password",
+                git_provider_model.credentials_personal_access_token,
+            ]
+            if git_provider_model.authentication_method == git.AuthenticationMethodEnum.CREDENTIALS
+            else []
+        )
+
+        return self._container.exec(
+            [
+                "airflow",
+                "connections",
+                "add",
+                connection_id,
+                "--conn-type",
+                "git",
+                "--conn-host",
+                git_provider_model.repository_url,
+                *credentials_options,
+                *extras_options,
+            ],
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
             environment={

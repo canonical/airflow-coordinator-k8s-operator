@@ -10,7 +10,7 @@ import logging
 import pathlib
 import tempfile
 import typing
-import unittest.mock
+import unittest
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import ops

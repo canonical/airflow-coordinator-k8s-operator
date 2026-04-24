@@ -4,6 +4,7 @@
 import logging
 import unittest.mock
 
+import charms.git_integrator.v0.git as git
 import cryptography.fernet
 import ops.testing
 import pytest
@@ -188,6 +189,71 @@ def s3_integrator_relation2():
 
 
 @pytest.fixture(scope="function")
+def git_unauthenticated_relation():
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url1",
+            "path": "test/path/1/",
+            "tracking-ref": "test-tracking-ref1",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_credentials_secret():
+    return ops.testing.Secret(
+        {
+            "credentials-personal-access-token": "test-token",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_credentials_relation(git_credentials_secret):
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url2",
+            "path": "test/path/2/",
+            "tracking-ref": "test-tracking-ref2",
+            "authentication-method": git.AuthenticationMethodEnum.CREDENTIALS,
+            "credentials-username": "user",
+            "secret-credentials-personal-access-token": git_credentials_secret.id,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_ssh_secret():
+    return ops.testing.Secret(
+        {
+            "ssh-private-key": "test-key",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_ssh_relation(git_ssh_secret):
+    return ops.testing.Relation(
+        constants.GIT_ENDPOINT_NAME,
+        remote_app_data={
+            "repository-url": "test-repo-url3",
+            "path": "test/path/3/",
+            "tracking-ref": "test-tracking-ref3",
+            "authentication-method": git.AuthenticationMethodEnum.SSH,
+            "secret-ssh-private-key": git_ssh_secret.id,
+            "ssh-strict-host-key-checking": "true",
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def git_integrator_relation_empty():
+    return ops.testing.Relation(constants.GIT_ENDPOINT_NAME, remote_app_data={})
+
+
+@pytest.fixture(scope="function")
 def all_required_relations(
     postgres_relation,
     api_server_relation,
@@ -198,6 +264,9 @@ def all_required_relations(
     airflow_api_server_requires_relation,
     s3_integrator_relation,
     s3_integrator_relation2,
+    git_unauthenticated_relation,
+    git_credentials_relation,
+    git_ssh_relation,
 ):
     return [
         postgres_relation,
@@ -209,7 +278,55 @@ def all_required_relations(
         airflow_api_server_requires_relation,
         s3_integrator_relation,
         s3_integrator_relation2,
+        git_unauthenticated_relation,
+        git_credentials_relation,
+        git_ssh_relation,
     ]
+
+
+@pytest.fixture(scope="function")
+def state_without_git(
+    all_required_relations, workload_container, mock_command_executor, fernet_key_secret
+):
+    relations_without_git = [
+        relation
+        for relation in all_required_relations
+        if relation.endpoint != constants.GIT_ENDPOINT_NAME
+    ]
+    return ops.testing.State(
+        leader=True,
+        relations=relations_without_git,
+        secrets=[fernet_key_secret],
+        containers=[workload_container],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def state_without_s3(
+    all_required_relations,
+    workload_container,
+    git_credentials_secret,
+    git_ssh_secret,
+    mock_command_executor,
+    fernet_key_secret,
+):
+    relations_without_s3 = [
+        relation
+        for relation in all_required_relations
+        if relation.endpoint != constants.S3_ENDPOINT_NAME
+    ]
+    return ops.testing.State(
+        leader=True,
+        relations=relations_without_s3,
+        containers=[workload_container],
+        secrets=[git_credentials_secret, git_ssh_secret, fernet_key_secret],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
+    )
 
 
 @pytest.fixture
@@ -231,6 +348,15 @@ def mock_container_pull():
         yield mock_pull
 
 
+@pytest.fixture
+def mock_container_push():
+    """Mock the pebble.Container.push method."""
+    with unittest.mock.patch(
+        "ops.Container.push",
+    ) as mock_push:
+        yield mock_push
+
+
 @pytest.fixture(scope="function")
 def mock_command_executor():
     """Mock the command executor to avoid actual container operations."""
@@ -249,6 +375,10 @@ def mock_command_executor():
             command_executor.CommandExecutor,
             "delete_airflow_connection",
         ) as mock_delete_airflow_connection,
+        unittest.mock.patch.object(
+            command_executor.CommandExecutor,
+            "add_airflow_git_connection",
+        ) as mock_add_airflow_git_connection,
     ):
         mock_run_db_migrate.return_value = command_executor.CommandExecutionResult(
             success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
@@ -262,12 +392,16 @@ def mock_command_executor():
         mock_delete_airflow_connection.return_value = command_executor.CommandExecutionResult(
             success=True, stdout="[]", parsed_stdout=[], stderr="", return_code=0
         )
+        mock_add_airflow_git_connection.return_value = command_executor.CommandExecutionResult(
+            success=True, stdout="", parsed_stdout=None, stderr="", return_code=0
+        )
 
         yield {
             "run_db_migrate": mock_run_db_migrate,
             "list_airflow_connections": mock_list_airflow_connections,
             "add_airflow_s3_connection": mock_add_airflow_s3_connection,
             "delete_airflow_connection": mock_delete_airflow_connection,
+            "add_airflow_git_connection": mock_add_airflow_git_connection,
         }
 
 
@@ -286,12 +420,19 @@ def fernet_key_secret(fernet_key):
 
 
 @pytest.fixture(scope="function")
-def state(all_required_relations, workload_container, mock_command_executor, fernet_key_secret):
+def state(
+    all_required_relations,
+    workload_container,
+    mock_command_executor,
+    fernet_key_secret,
+    git_credentials_secret,
+    git_ssh_secret,
+):
     return ops.testing.State(
         leader=True,
         relations=all_required_relations,
         containers=[workload_container],
-        secrets=[fernet_key_secret],
+        secrets=[fernet_key_secret, git_credentials_secret, git_ssh_secret],
         config={
             constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
         },
