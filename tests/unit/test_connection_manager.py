@@ -104,6 +104,18 @@ def valid_git_provider_model():
 
 
 @pytest.fixture(scope="function")
+def valid_git_ssh_provider_model():
+    return git.GitProviderModel(
+        repository_url="test-repo-url",
+        authentication_method=git.AuthenticationMethodEnum.SSH,
+        ssh_private_key="test-private-key",
+        ssh_passphrase="test-passphrase",
+        ssh_strict_host_key_checking=True,
+        ssh_port=2222,
+    )
+
+
+@pytest.fixture(scope="function")
 def airflow_connection_for_valid_git_provider_model():
     return connection_manager.AirflowConnection(
         conn_id="git_relation_2_connection",
@@ -277,6 +289,78 @@ class TestConnectionManager:
 
         assert airflow_connection_manager.has_connection_for_git_changed(
             "git_relation_2_connection", valid_git_provider_model
+        )
+
+    def test_has_connection_for_git_ssh_with_changed_passphrase(
+        self,
+        airflow_connection_manager,
+        valid_git_ssh_provider_model,
+        mock_command_executor,
+    ):
+        """Test change detection when SSH passphrase changes."""
+        mock_command_executor[
+            "list_airflow_connections"
+        ].return_value = command_executor_with_json_result(
+            [
+                {
+                    "conn_id": "git_relation_3_connection",
+                    "conn_type": "git",
+                    "host": "test-repo-url",
+                    "extra-dejson": {
+                        "private_key": "test-private-key",
+                        "private_key_passphrase": "test-passphrase",
+                        "strict_host_key_checking": "true",
+                        "ssh_port": "2222",
+                    },
+                },
+            ]
+        )
+
+        assert not airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_3_connection", valid_git_ssh_provider_model
+        )
+
+        valid_git_ssh_provider_model.ssh_passphrase = "new-passphrase"
+
+        airflow_connection_manager.refresh()
+        assert airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_3_connection", valid_git_ssh_provider_model
+        )
+
+    def test_has_connection_for_git_ssh_with_changed_port(
+        self,
+        airflow_connection_manager,
+        valid_git_ssh_provider_model,
+        mock_command_executor,
+    ):
+        """Test change detection when SSH port changes."""
+        mock_command_executor[
+            "list_airflow_connections"
+        ].return_value = command_executor_with_json_result(
+            [
+                {
+                    "conn_id": "git_relation_3_connection",
+                    "conn_type": "git",
+                    "host": "test-repo-url",
+                    "extra-dejson": {
+                        "private_key": "test-private-key",
+                        "private_key_passphrase": "test-passphrase",
+                        "strict_host_key_checking": "true",
+                        "ssh_port": "2222",
+                    },
+                },
+            ]
+        )
+
+        assert not airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_3_connection", valid_git_ssh_provider_model
+        )
+
+        valid_git_ssh_provider_model.ssh_port = 3333
+
+        airflow_connection_manager.refresh()
+        assert airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_3_connection", valid_git_ssh_provider_model
         )
 
     @pytest.mark.parametrize(

@@ -207,10 +207,16 @@ class CommandExecutor:
         if git_provider_model.authentication_method == git.AuthenticationMethodEnum.SSH:
             extras["private_key"] = git_provider_model.ssh_private_key
 
+            if git_provider_model.ssh_passphrase is not None:
+                extras["private_key_passphrase"] = git_provider_model.ssh_passphrase
+
             if git_provider_model.ssh_strict_host_key_checking is not None:
                 extras["strict_host_key_checking"] = (
                     git_provider_model.ssh_strict_host_key_checking
                 )
+
+            if git_provider_model.ssh_port is not None:
+                extras["ssh_port"] = str(git_provider_model.ssh_port)
 
         extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
 

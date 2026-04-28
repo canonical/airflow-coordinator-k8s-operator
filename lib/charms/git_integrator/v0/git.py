@@ -92,7 +92,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 2
+LIBPATCH = 3
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,12 @@ SSHPrivateKeyStr = typing.Annotated[
     "ssh-private-key",
 ]
 
+SSHPassphraseStr = typing.Annotated[
+    data_interfaces.OptionalSecretStr,
+    pydantic.Field(default=None, exclude=True),
+    "ssh-passphrase",
+]
+
 
 class GitProviderModel(data_interfaces.BaseCommonModel):
     """Provider side of the git relation interface."""
@@ -140,7 +146,12 @@ class GitProviderModel(data_interfaces.BaseCommonModel):
     secret_ssh_private_key: data_interfaces.SecretString | None = pydantic.Field(
         default=None, tag="restricted"
     )
+    ssh_passphrase: SSHPassphraseStr
+    secret_ssh_passphrase: data_interfaces.SecretString | None = pydantic.Field(
+        default=None, tag="restricted"
+    )
     ssh_strict_host_key_checking: bool | None = pydantic.Field(default=None, tag="resettable")
+    ssh_port: int | None = pydantic.Field(default=None, tag="resettable")
 
     # hack to enable databag diff computation with data_interfaces v1 charm lib
     request_id: str = pydantic.Field(default="fixed_request_id", exclude=True, tag="restricted")
@@ -423,7 +434,11 @@ class GitProviderEventHandler(data_interfaces.EventHandlers, typing.Generic[TGit
                         if model.secret_ssh_private_key:
                             model.ssh_private_key = "None"
 
+                        if model.secret_ssh_passphrase:
+                            model.ssh_passphrase = "None"
+
                         model.ssh_strict_host_key_checking = None
+                        model.ssh_port = None
 
                     if (
                         not authentication_method
@@ -540,7 +555,9 @@ class GitProvides(ops.Object):
                 - credentials_username (if authentication_method == "credentials")
                 - credentials_personal_access_token (if authentication_method == "credentials")
                 - ssh_private_key (if authentication_method == "ssh")
+                - ssh_passphrase (optional if authentication_method == "ssh")
                 - ssh_strict_host_key_checking (optional if authentication_method == "ssh")
+                - ssh_port (optional if authentication_method == "ssh")
         """
         if not self.relations_exists:
             return
@@ -552,7 +569,12 @@ class GitProvides(ops.Object):
             raise ValueError("Prohibited fields in provided connection info")
 
         credentials_fields = ["credentials_username", "credentials_personal_access_token"]
-        ssh_fields = ["ssh_private_key", "ssh_strict_host_key_checking"]
+        ssh_fields = [
+            "ssh_private_key",
+            "ssh_passphrase",
+            "ssh_strict_host_key_checking",
+            "ssh_port",
+        ]
 
         if connection_info.get("authentication_method") == AuthenticationMethodEnum.CREDENTIALS:
             if not all(key in connection_info for key in credentials_fields):
