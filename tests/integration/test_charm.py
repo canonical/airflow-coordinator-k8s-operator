@@ -8,6 +8,7 @@ import json
 import logging
 import pathlib
 
+import cryptography.fernet
 import jubilant
 import yaml
 
@@ -42,10 +43,28 @@ def test_deploy(juju: jubilant.Juju, charm: pathlib.Path, mock_core_charm: pathl
     """Deploy the charm under test."""
     logger.info("Deploying coordinator + postgresql")
 
+    fernet_key = cryptography.fernet.Fernet.generate_key().decode()
+
+    fernet_key_secret_uri = juju.add_secret(
+        name="fernet-key-secret",
+        content={
+            constants.FERNET_KEY: fernet_key,
+        },
+    )
+
     juju.deploy(
         charm.resolve(),
         app="airflow-coordinator-k8s",
         resources={"airflow-coordinator-image": WORKLOAD_IMAGE},
+    )
+
+    juju.grant_secret(fernet_key_secret_uri, "airflow-coordinator-k8s")
+
+    juju.config(
+        "airflow-coordinator-k8s",
+        {
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret_uri,
+        },
     )
 
     # TODO: change postgres to 16/stable once released

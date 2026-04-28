@@ -5,6 +5,7 @@ import logging
 import unittest.mock
 
 import charms.git_integrator.v0.git as git
+import cryptography.fernet
 import ops.testing
 import pytest
 
@@ -284,26 +285,8 @@ def all_required_relations(
 
 
 @pytest.fixture(scope="function")
-def state(
-    all_required_relations,
-    workload_container,
-    git_credentials_secret,
-    git_ssh_secret,
-    mock_command_executor,
-):
-    return ops.testing.State(
-        leader=True,
-        relations=all_required_relations,
-        containers=[workload_container],
-        secrets=[git_credentials_secret, git_ssh_secret],
-    )
-
-
-@pytest.fixture(scope="function")
 def state_without_git(
-    all_required_relations,
-    workload_container,
-    mock_command_executor,
+    all_required_relations, workload_container, mock_command_executor, fernet_key_secret
 ):
     relations_without_git = [
         relation
@@ -313,7 +296,11 @@ def state_without_git(
     return ops.testing.State(
         leader=True,
         relations=relations_without_git,
+        secrets=[fernet_key_secret],
         containers=[workload_container],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
     )
 
 
@@ -324,6 +311,7 @@ def state_without_s3(
     git_credentials_secret,
     git_ssh_secret,
     mock_command_executor,
+    fernet_key_secret,
 ):
     relations_without_s3 = [
         relation
@@ -334,7 +322,10 @@ def state_without_s3(
         leader=True,
         relations=relations_without_s3,
         containers=[workload_container],
-        secrets=[git_credentials_secret, git_ssh_secret],
+        secrets=[git_credentials_secret, git_ssh_secret, fernet_key_secret],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
     )
 
 
@@ -412,3 +403,37 @@ def mock_command_executor():
             "delete_airflow_connection": mock_delete_airflow_connection,
             "add_airflow_git_connection": mock_add_airflow_git_connection,
         }
+
+
+@pytest.fixture(scope="function")
+def fernet_key():
+    return cryptography.fernet.Fernet.generate_key().decode()
+
+
+@pytest.fixture(scope="function")
+def fernet_key_secret(fernet_key):
+    return ops.testing.Secret(
+        {
+            constants.FERNET_KEY: fernet_key,
+        },
+    )
+
+
+@pytest.fixture(scope="function")
+def state(
+    all_required_relations,
+    workload_container,
+    mock_command_executor,
+    fernet_key_secret,
+    git_credentials_secret,
+    git_ssh_secret,
+):
+    return ops.testing.State(
+        leader=True,
+        relations=all_required_relations,
+        containers=[workload_container],
+        secrets=[fernet_key_secret, git_credentials_secret, git_ssh_secret],
+        config={
+            constants.FERNET_KEY_SECRET_CONFIG: fernet_key_secret.id,
+        },
+    )

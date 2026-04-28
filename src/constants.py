@@ -40,6 +40,9 @@ AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
 )
+MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
+INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
+MISSING_FERNET_KEY_IN_SECRET_MESSAGE = "Missing fernet key in secret"
 ISSUE_RECONCILING_AIRFLOW_CONNECTIONS_MESSAGE = (
     "Internal issue while reconciling S3/git Airflow connections"
 )
@@ -56,3 +59,6 @@ INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+
+FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
+FERNET_KEY = "fernet-key"

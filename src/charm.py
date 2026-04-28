@@ -16,7 +16,6 @@ import charms.git_integrator.v0.git as git
 import mergedeep
 import object_storage
 import ops
-from cryptography.fernet import Fernet
 from ops.pebble import LayerDict
 
 import command_executor
@@ -162,7 +161,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return {
             "secret-key": secrets.token_hex(32),
             "jwt-secret": secrets.token_hex(32),
-            "fernet-key": Fernet.generate_key().decode(),
         }
 
     def _ensure_airflow_keys_generated(self) -> None:
@@ -202,6 +200,30 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             raise ExceptionWithStatusError(
                 constants.AIRFLOW_KEYS_SECRET_ERROR_MESSAGE, ops.BlockedStatus
             )
+
+    @property
+    def _fernet_key(self) -> str:
+        """Fernet key from juju user secret in configuration."""
+        try:
+            secret = self.model.get_secret(
+                id=self.config[constants.FERNET_KEY_SECRET_CONFIG],
+                label=constants.FERNET_KEY,
+            )
+        except (ops.SecretNotFoundError, ops.ModelError):
+            logger.exception("Issue retrieving fernet key secret")
+            raise ExceptionWithStatusError(
+                constants.INVALID_FERNET_KEY_SECRET_MESSAGE,
+                ops.BlockedStatus,
+            )
+
+        fernet_key = secret.get_content().get(constants.FERNET_KEY)
+        if not fernet_key:
+            raise ExceptionWithStatusError(
+                constants.MISSING_FERNET_KEY_IN_SECRET_MESSAGE,
+                ops.BlockedStatus,
+            )
+
+        return fernet_key
 
     @property
     def _db_migration_ran(self) -> bool:
@@ -317,6 +339,18 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def _validate_configs(self):
         """Ensure validity of charm configurations."""
+        if not self.config:
+            return
+
+        if not self.config.get(constants.FERNET_KEY_SECRET_CONFIG):
+            raise ExceptionWithStatusError(
+                constants.MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE,
+                ops.BlockedStatus,
+            )
+
+        # Ensures validity of provided secret and proper retrieval of fernet key
+        self._fernet_key
+
         try:
             timezone = self.config.get(constants.CORE_DEFAULT_TIMEZONE_CONFIG, "")
 

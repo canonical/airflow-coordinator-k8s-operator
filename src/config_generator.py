@@ -225,5 +225,5 @@ class AirflowConfigGenerator:
             "database__sql_alchemy_conn": self._sql_alchemy_connection_string,
             "api__secret_key": keys_content["secret-key"],
             "api_auth__jwt_secret": keys_content["jwt-secret"],
-            "core__fernet_key": keys_content["fernet-key"],
+            "core__fernet_key": self._charm._fernet_key,
         }
