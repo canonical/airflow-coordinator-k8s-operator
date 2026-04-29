@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 POSTGRES_DATA = {
     "username": "airflow_user",
     "password": "airflow_password",
-    "database": "airflow",
+    "database": "airflow_coordinator_k8s",
     "endpoints": "airflow_host:airflow_port",
     "read_only_endpoints": "airflow_read_only_host:airflow_read_only_port",
 }
 
 
 POSTGRES_SQL_ALCHEMY_STRING = (
-    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow"
+    "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow_coordinator_k8s"
 )
 
 

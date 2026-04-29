@@ -56,7 +56,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         self._database_requires = data_interfaces_v0.DatabaseRequires(
             self,
             constants.POSTGRES_RELATION_NAME,
-            database_name=constants.AIRFLOW_DATABASE_NAME,
+            database_name=self.app.name.replace("-", "_"),
         )
         self._config_provider = airflow_coordinator.AirflowCoordinatorProvides(
             self,
