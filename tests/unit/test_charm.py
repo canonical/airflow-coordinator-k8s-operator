@@ -1073,7 +1073,30 @@ class TestDagBundles:
                 }.items()
             ]
 
-        assert mock_command_executor["add_airflow_git_connection"].call_count == 2
+        expected_add_airflow_connection_calls = [
+            unittest.mock.call(
+                "git_default",
+                git.GitProviderModel(repository_url="https://github.com"),
+            ),
+            unittest.mock.call(
+                f"git_relation_{git_credentials_relation.id}_connection",
+                git.GitProviderModel(
+                    **git_credentials_relation.remote_app_data,
+                    credentials_personal_access_token="test-token",
+                ),
+            ),
+            unittest.mock.call(
+                f"git_relation_{git_ssh_relation.id}_connection",
+                git.GitProviderModel(
+                    **git_ssh_relation.remote_app_data,
+                    ssh_private_key="test-key",
+                ),
+            ),
+        ]
+
+        assert sorted(mock_command_executor["add_airflow_git_connection"].mock_calls) == sorted(
+            expected_add_airflow_connection_calls
+        )
         mock_command_executor["add_airflow_git_connection"].reset_mock()
 
         modified_git_unauthenticated_relation = ops.testing.Relation(
@@ -1244,7 +1267,30 @@ class TestDagBundles:
                 }.items()
             ]
 
-        assert mock_command_executor["add_airflow_git_connection"].call_count == 2
+        expected_add_airflow_connection_calls = [
+            unittest.mock.call(
+                "git_default",
+                git.GitProviderModel(repository_url="https://github.com"),
+            ),
+            unittest.mock.call(
+                f"git_relation_{git_credentials_relation.id}_connection",
+                git.GitProviderModel(
+                    **git_credentials_relation.remote_app_data,
+                    credentials_personal_access_token="test-token",
+                ),
+            ),
+            unittest.mock.call(
+                f"git_relation_{git_ssh_relation.id}_connection",
+                git.GitProviderModel(
+                    **git_ssh_relation.remote_app_data,
+                    ssh_private_key="test-key",
+                ),
+            ),
+        ]
+
+        assert sorted(mock_command_executor["add_airflow_git_connection"].mock_calls) == sorted(
+            expected_add_airflow_connection_calls
+        )
         mock_command_executor["add_airflow_git_connection"].reset_mock()
 
         relations_with_removed_git_relation = [

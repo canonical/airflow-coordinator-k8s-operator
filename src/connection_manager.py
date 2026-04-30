@@ -238,10 +238,16 @@ class AirflowConnectionManager:
             git_provider_model,
         ) in self._charm._git_requires.get_git_connection_information().items():
             if git_provider_model.authentication_method is None:
-                logger.debug(
-                    f"Skipping Airflow connection creation for relation {relation_id}"
-                    " since it has no authentication"
-                )
+                if "git_default" not in self.airflow_connections:
+                    logger.info("Adding git_default Airflow connection")
+
+                    self._charm._command_executor.add_airflow_git_connection(
+                        "git_default",
+                        git.GitProviderModel(
+                            repository_url="https://github.com",
+                        ),
+                    )
+
                 continue
 
             connection_id = f"git_relation_{relation_id}_connection"
