@@ -202,7 +202,7 @@ class AirflowConfigGenerator:
 
         git_dag_bundles = [
             self._dag_bundle_for_git_connection(relation_id, git_provider_model)
-            for relation_id, git_provider_model in self._charm._git_requires.get_git_connection_information().items()  # noqa: E501
+            for relation_id, git_provider_model in self._charm.git_relation_connections.items()  # noqa: E501
         ]
 
         if not s3_dag_bundles and not git_dag_bundles:

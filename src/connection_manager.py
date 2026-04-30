@@ -233,21 +233,23 @@ class AirflowConnectionManager:
         """Create or update git connections that have changed."""
         airflow_connection_ids = [connection.conn_id for connection in self.airflow_connections]
 
+        if "git_default" not in self.airflow_connections and self._charm.git_relation_connections:
+            logger.info("Adding `git_default` Airflow connection")
+
+            self._charm._command_executor.add_airflow_git_connection(
+                "git_default",
+                git.GitProviderModel(
+                    repository_url="https://github.com",
+                ),
+            )
+
+            self.refresh()
+
         for (
             relation_id,
             git_provider_model,
-        ) in self._charm._git_requires.get_git_connection_information().items():
+        ) in self._charm.git_relation_connections.items():
             if git_provider_model.authentication_method is None:
-                if "git_default" not in self.airflow_connections:
-                    logger.info("Adding git_default Airflow connection")
-
-                    self._charm._command_executor.add_airflow_git_connection(
-                        "git_default",
-                        git.GitProviderModel(
-                            repository_url="https://github.com",
-                        ),
-                    )
-
                 continue
 
             connection_id = f"git_relation_{relation_id}_connection"
@@ -284,8 +286,11 @@ class AirflowConnectionManager:
         for airflow_connection_id in [
             connection.conn_id
             for connection in self.airflow_connections
-            if connection.conn_id.startswith("s3_relation_")
-            or connection.conn_id.startswith("git_relation_")
+            if (
+                connection.conn_id.startswith("s3_relation_")
+                or connection.conn_id.startswith("git_relation_")
+            )
+            and connection.conn_id != "git_default"
         ]:
             if (
                 airflow_connection_id not in s3_relation_connection_ids

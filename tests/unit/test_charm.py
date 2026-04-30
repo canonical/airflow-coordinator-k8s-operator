@@ -1203,6 +1203,11 @@ class TestDagBundles:
                     "strict_host_key_checking": "true",
                 },
             },
+            {
+                "conn_id": "git_default",
+                "conn_type": "git",
+                "host": "https://github.com",
+            },
         ]
 
         mock_command_executor["list_airflow_connections"].side_effect = [
@@ -1214,14 +1219,21 @@ class TestDagBundles:
             ),
             command_executor.CommandExecutionResult(
                 success=True,
-                stdout=json.dumps(airflow_connections),
-                parsed_stdout=airflow_connections,
+                stdout=json.dumps(airflow_connections[3:]),
+                parsed_stdout=airflow_connections[3:],
                 stderr="",
                 return_code=0,
             ),
             command_executor.CommandExecutionResult(
                 success=True,
-                stdout=json.dumps(airflow_connections),
+                stdout=json.dumps(airflow_connections[1:]),
+                parsed_stdout=airflow_connections[1:],
+                stderr="",
+                return_code=0,
+            ),
+            command_executor.CommandExecutionResult(
+                success=True,
+                stdout=json.dumps(airflow_connections[1:]),
                 parsed_stdout=airflow_connections[1:],
                 stderr="",
                 return_code=0,
@@ -1332,7 +1344,10 @@ class TestDagBundles:
                 },
             ]
 
-        mock_command_executor["add_airflow_git_connection"].assert_not_called()
+        mock_command_executor["add_airflow_git_connection"].assert_called_once_with(
+            "git_default",
+            git.GitProviderModel(repository_url="https://github.com"),
+        )
         mock_command_executor["delete_airflow_connection"].mock_calls == [
             unittest.mock.call(f"git_relation_{git_credentials_relation.id}_connection"),
         ]
