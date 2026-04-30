@@ -3,7 +3,6 @@
 
 """Airflow connection management abstraction for Airflow Coordinator charm."""
 
-import dataclasses
 import functools
 import json
 import logging
@@ -12,6 +11,7 @@ import typing
 import charms.git_integrator.v0.git as git
 import object_storage
 import ops
+import pydantic
 
 import constants
 
@@ -22,7 +22,7 @@ class InvalidAirflowConnectionsError(Exception):
     """Custom exception raised when `airflow connections list` output is invalid."""
 
 
-@dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 class AirflowConnection:
     """Dataclass representing an Airflow connection."""
 
@@ -33,7 +33,7 @@ class AirflowConnection:
     login: str | None = None
     password: str | None = None
 
-    extra_dejson: dict = dataclasses.field(default_factory=dict)
+    extra_dejson: dict = pydantic.Field(default_factory=dict)
 
     @classmethod
     def from_airflow_connections_list_output(cls, data: list[dict]):
@@ -49,7 +49,7 @@ class AirflowConnection:
         ]
 
 
-@dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 class S3ConnectionInfo:
     """S3 Connection Info extracted from object_storage lib."""
 
@@ -62,7 +62,7 @@ class S3ConnectionInfo:
     path: typing.Optional[str] = None
     s3_api_version: typing.Optional[str] = None
     s3_uri_style: typing.Optional[str] = None
-    tls_ca_chain: list[str] = dataclasses.field(default_factory=list)
+    tls_ca_chain: list[str] = pydantic.Field(default_factory=list)
     delete_older_than_days: typing.Optional[str] = None
 
     @classmethod
@@ -77,6 +77,12 @@ class S3ConnectionInfo:
             return None
 
         normalized_data = {key.replace("-", "_"): value for key, value in data.items()}
+
+        if isinstance(normalized_data["tls_ca_chain"], str):
+            try:
+                normalized_data["tls_ca_chain"] = json.loads(normalized_data["tls_ca_chain"])
+            except Exception:
+                pass
 
         return cls(**normalized_data)
 
