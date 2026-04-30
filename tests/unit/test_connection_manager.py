@@ -291,6 +291,63 @@ class TestConnectionManager:
             "git_relation_2_connection", valid_git_provider_model
         )
 
+    def test_has_connection_for_git_credentials_detects_leftover_ssh_passphrase(
+        self,
+        airflow_connection_manager,
+        valid_git_provider_model,
+        mock_command_executor,
+    ):
+        """Test that switching from SSH to credentials detects leftover private_key_passphrase."""
+        mock_command_executor[
+            "list_airflow_connections"
+        ].return_value = command_executor_with_json_result(
+            [
+                {
+                    "conn_id": "git_relation_2_connection",
+                    "conn_type": "git",
+                    "host": "test-repo-url",
+                    "extra-dejson": {
+                        "private_key": "old-key",
+                        "private_key_passphrase": "old-passphrase",
+                        "strict_host_key_checking": "true",
+                        "ssh_port": "2222",
+                    },
+                },
+            ]
+        )
+
+        assert airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_2_connection", valid_git_provider_model
+        )
+
+    def test_has_connection_for_git_credentials_detects_leftover_ssh_port(
+        self,
+        airflow_connection_manager,
+        valid_git_provider_model,
+        mock_command_executor,
+    ):
+        """Test that switching from SSH to credentials detects leftover ssh_port."""
+        mock_command_executor[
+            "list_airflow_connections"
+        ].return_value = command_executor_with_json_result(
+            [
+                {
+                    "conn_id": "git_relation_2_connection",
+                    "conn_type": "git",
+                    "host": "test-repo-url",
+                    "login": "test-login",
+                    "password": "test-personal-access-token",
+                    "extra-dejson": {
+                        "ssh_port": "2222",
+                    },
+                },
+            ]
+        )
+
+        assert airflow_connection_manager.has_connection_for_git_changed(
+            "git_relation_2_connection", valid_git_provider_model
+        )
+
     def test_has_connection_for_git_ssh_with_changed_passphrase(
         self,
         airflow_connection_manager,
