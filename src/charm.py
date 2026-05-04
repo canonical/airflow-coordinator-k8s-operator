@@ -400,8 +400,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             erroneous_relation_ids = [
                 str(relation.id)
                 for relation in self._git_requires.relations
-                if relation.id not in self._git_requires.get_git_connection_information()
-                and relation.data[relation.app]
+                if relation.id not in self.git_relation_connections and relation.data[relation.app]
             ]
 
             if erroneous_relation_ids:
