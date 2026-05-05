@@ -4,7 +4,6 @@ load_examples = False
 fernet_key = {{ core__fernet_key }}
 dagbag_import_error_tracebacks = False
 check_migrations = False
-default_impersonation = ubuntu
 
 [database]
 {% if render_sensitive_data %}sql_alchemy_conn = {{ database__sql_alchemy_conn }}{% endif %}
