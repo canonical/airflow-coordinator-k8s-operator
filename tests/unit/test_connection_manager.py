@@ -309,8 +309,6 @@ class TestConnectionManager:
                     "extra-dejson": {
                         "private_key": "old-key",
                         "private_key_passphrase": "old-passphrase",
-                        "strict_host_key_checking": "true",
-                        "ssh_port": "2222",
                     },
                 },
             ]
