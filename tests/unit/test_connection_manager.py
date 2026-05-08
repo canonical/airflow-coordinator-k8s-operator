@@ -450,13 +450,26 @@ class TestConnectionManager:
             if expect_updates:
                 mock_command_executor["delete_airflow_connection"].assert_not_called()
 
-                mock_command_executor["add_airflow_git_connection"].assert_called_once_with(
-                    connection_id,
-                    valid_git_provider_model,
+                assert sorted(
+                    mock_command_executor["add_airflow_git_connection"].mock_calls
+                ) == sorted(
+                    [
+                        unittest.mock.call(
+                            "git_default",
+                            git.GitProviderModel(repository_url="https://github.com"),
+                        ),
+                        unittest.mock.call(
+                            connection_id,
+                            valid_git_provider_model,
+                        ),
+                    ]
                 )
             else:
                 mock_command_executor["delete_airflow_connection"].assert_not_called()
-                mock_command_executor["add_airflow_git_connection"].assert_not_called()
+                mock_command_executor["add_airflow_git_connection"].assert_called_once_with(
+                    "git_default",
+                    git.GitProviderModel(repository_url="https://github.com"),
+                )
 
     def test_delete_stale_connections(
         self, airflow_connection_manager, valid_list_airflow_connections_output

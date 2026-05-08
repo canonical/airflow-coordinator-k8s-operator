@@ -3,7 +3,6 @@
 
 """Airflow connection management abstraction for Airflow Coordinator charm."""
 
-import dataclasses
 import functools
 import json
 import logging
@@ -12,6 +11,7 @@ import typing
 import charms.git_integrator.v0.git as git
 import object_storage
 import ops
+import pydantic
 
 import constants
 
@@ -22,7 +22,7 @@ class InvalidAirflowConnectionsError(Exception):
     """Custom exception raised when `airflow connections list` output is invalid."""
 
 
-@dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 class AirflowConnection:
     """Dataclass representing an Airflow connection."""
 
@@ -33,7 +33,7 @@ class AirflowConnection:
     login: str | None = None
     password: str | None = None
 
-    extra_dejson: dict = dataclasses.field(default_factory=dict)
+    extra_dejson: dict = pydantic.Field(default_factory=dict)
 
     @classmethod
     def from_airflow_connections_list_output(cls, data: list[dict]):
@@ -49,7 +49,7 @@ class AirflowConnection:
         ]
 
 
-@dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 class S3ConnectionInfo:
     """S3 Connection Info extracted from object_storage lib."""
 
@@ -62,7 +62,7 @@ class S3ConnectionInfo:
     path: typing.Optional[str] = None
     s3_api_version: typing.Optional[str] = None
     s3_uri_style: typing.Optional[str] = None
-    tls_ca_chain: list[str] = dataclasses.field(default_factory=list)
+    tls_ca_chain: list[str] = pydantic.Field(default_factory=list)
     delete_older_than_days: typing.Optional[str] = None
 
     @classmethod
@@ -77,6 +77,12 @@ class S3ConnectionInfo:
             return None
 
         normalized_data = {key.replace("-", "_"): value for key, value in data.items()}
+
+        if isinstance(normalized_data["tls_ca_chain"], str):
+            try:
+                normalized_data["tls_ca_chain"] = json.loads(normalized_data["tls_ca_chain"])
+            except Exception:
+                pass
 
         return cls(**normalized_data)
 
@@ -239,15 +245,23 @@ class AirflowConnectionManager:
         """Create or update git connections that have changed."""
         airflow_connection_ids = [connection.conn_id for connection in self.airflow_connections]
 
+        if "git_default" not in self.airflow_connections and self._charm.git_relation_connections:
+            logger.info("Adding `git_default` Airflow connection")
+
+            self._charm._command_executor.add_airflow_git_connection(
+                "git_default",
+                git.GitProviderModel(
+                    repository_url="https://github.com",
+                ),
+            )
+
+            self.refresh()
+
         for (
             relation_id,
             git_provider_model,
-        ) in self._charm._git_requires.get_git_connection_information().items():
+        ) in self._charm.git_relation_connections.items():
             if git_provider_model.authentication_method is None:
-                logger.debug(
-                    f"Skipping Airflow connection creation for relation {relation_id}"
-                    " since it has no authentication"
-                )
                 continue
 
             connection_id = f"git_relation_{relation_id}_connection"
@@ -284,8 +298,11 @@ class AirflowConnectionManager:
         for airflow_connection_id in [
             connection.conn_id
             for connection in self.airflow_connections
-            if connection.conn_id.startswith("s3_relation_")
-            or connection.conn_id.startswith("git_relation_")
+            if (
+                connection.conn_id.startswith("s3_relation_")
+                or connection.conn_id.startswith("git_relation_")
+            )
+            and connection.conn_id != "git_default"
         ]:
             if (
                 airflow_connection_id not in s3_relation_connection_ids

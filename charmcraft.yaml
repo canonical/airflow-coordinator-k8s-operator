@@ -46,7 +46,7 @@ resources:
   airflow-coordinator-image:
     type: oci-image
     description: Airflow workload container for running commands
-    upstream-source: ubuntu/airflow:3.1-24.04_edge
+    upstream-source: ubuntu/airflow@sha256:0a025779768549281c662b9e01589ce94e4a9d69f0ffd5040fd039104e3c0d59
 
 provides:
   airflow-coordinator:
