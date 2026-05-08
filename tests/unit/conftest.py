@@ -15,18 +15,18 @@ from charm import AirflowCoordinatorK8SOperatorCharm
 
 logger = logging.getLogger(__name__)
 
-TEST_MODEL = ops.testing.Model(name="test-model")
+TEST_MODEL = ops.testing.Model(name="test-model", uuid="00000000-0000-0000-0000-000000000001")
 
 POSTGRES_DATA = {
     "username": "airflow_user",
     "password": "airflow_password",
-    "database": "test_model_airflow_coordinator_k8s",
+    "database": "airflow_coordinator_k8s_00000000_0000_0000_0000_000000000001",
     "endpoints": "airflow_host:airflow_port",
     "read_only_endpoints": "airflow_read_only_host:airflow_read_only_port",
 }
 
 
-POSTGRES_SQL_ALCHEMY_STRING = "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/test_model_airflow_coordinator_k8s"
+POSTGRES_SQL_ALCHEMY_STRING = "postgresql+psycopg2://airflow_user:airflow_password@airflow_host:airflow_port/airflow_coordinator_k8s_00000000_0000_0000_0000_000000000001"
 
 
 @pytest.fixture
