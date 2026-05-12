@@ -12,7 +12,7 @@ AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-
 PEER_RELATION_NAME = "coordinator-peers"
 
 POSTGRES_RELATION_NAME = "postgres"
-AIRFLOW_DATABASE_NAME = "airflow"
+# AIRFLOW_DATABASE_NAME = "airflow"
 
 WORKLOAD_CONTAINER_NAME = "airflow-coordinator"
 AIRFLOW_HOME = "/opt/airflow"
