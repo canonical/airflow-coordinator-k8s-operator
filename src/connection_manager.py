@@ -212,6 +212,8 @@ class AirflowConnectionManager:
             has_authentication_changed = (
                 airflow_connection.extra_dejson.get("private_key")
                 or airflow_connection.extra_dejson.get("strict_host_key_checking")
+                or airflow_connection.extra_dejson.get("private_key_passphrase")
+                or airflow_connection.extra_dejson.get("ssh_port")
                 or airflow_connection.login != git_provider_model.credentials_username
                 or airflow_connection.password
                 != git_provider_model.credentials_personal_access_token
@@ -224,8 +226,12 @@ class AirflowConnectionManager:
                 or airflow_connection.password
                 or airflow_connection.extra_dejson.get("private_key")
                 != git_provider_model.ssh_private_key
+                or airflow_connection.extra_dejson.get("private_key_passphrase")
+                != git_provider_model.ssh_passphrase
                 or json.loads(airflow_connection.extra_dejson.get("strict_host_key_checking"))
                 != git_provider_model.ssh_strict_host_key_checking
+                or airflow_connection.extra_dejson.get("ssh_port")
+                != (str(git_provider_model.ssh_port) if git_provider_model.ssh_port else None)
             )
         else:
             has_authentication_changed = False
