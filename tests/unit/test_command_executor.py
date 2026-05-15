@@ -311,3 +311,58 @@ class TestCommandExecutor:
                 "AIRFLOW_HOME": constants.AIRFLOW_HOME,
             },
         )
+
+    def test_add_airflow_git_ssh_connection_with_passphrase_and_port(
+        self, executor, mock_container
+    ):
+        mock_process = unittest.mock.MagicMock()
+        mock_process.wait_output.return_value = ("Airflow connection added", "")
+        mock_container.exec.return_value = mock_process
+
+        git_provider_model_ssh = git.GitProviderModel(
+            repository_url="test-repo-url",
+            path="test/path/",
+            tracking_ref="test-tracking-ref",
+            authentication_method=git.AuthenticationMethodEnum.SSH,
+            ssh_private_key="test-private-key",
+            ssh_passphrase="test-passphrase",
+            ssh_strict_host_key_checking=True,
+            ssh_port=2222,
+        )
+
+        result = executor.add_airflow_git_connection(
+            "test-connection-id",
+            git_provider_model_ssh,
+        )
+
+        assert result.success is True
+        assert result.stdout == "Airflow connection added"
+        assert result.stderr == ""
+        assert result.return_code == 0
+
+        mock_container.exec.assert_called_once_with(
+            [
+                "airflow",
+                "connections",
+                "add",
+                "test-connection-id",
+                "--conn-type",
+                "git",
+                "--conn-host",
+                "test-repo-url",
+                "--conn-extra",
+                json.dumps(
+                    {
+                        "private_key": "test-private-key",
+                        "private_key_passphrase": "test-passphrase",
+                        "strict_host_key_checking": True,
+                        "ssh_port": "2222",
+                    },
+                ),
+            ],
+            user=constants.WORKLOAD_USER,
+            group=constants.WORKLOAD_GROUP,
+            environment={
+                "AIRFLOW_HOME": constants.AIRFLOW_HOME,
+            },
+        )
