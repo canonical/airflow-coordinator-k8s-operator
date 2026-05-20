@@ -23,8 +23,7 @@ import command_executor
 import config_generator
 import connection_manager
 import constants
-import webserver_config_generator
-from webserver_config_generator import WebserverConfigError
+from webserver_config_generator import WebserverConfigGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +50,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
+        self._webserver_config_generator = WebserverConfigGenerator(self)
         self._command_executor = command_executor.CommandExecutor(self._container)
         self._connection_manager = connection_manager.AirflowConnectionManager(
             self, self._container
@@ -350,28 +350,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
     @property
-    def _webserver_config_content(self) -> str | None:
-        """Render webserver_config.py content, or None when OAuth is not active."""
-        if not self._oauth_active:
-            return None
-        try:
-            provider_info = self._oauth_requirer.get_provider_info()
-            return webserver_config_generator.render_webserver_config(
-                provider_info=provider_info,
-                api_base_url=self._config_generator._api_server_base_url,
-                idp_group_config={
-                    "admin": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_ADMIN, "")),
-                    "op": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_OP, "")),
-                    "user": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_USER, "")),
-                    "viewer": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_VIEWER, "")),
-                    "public": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_PUBLIC, "")),
-                },
-            )
-        except WebserverConfigError:
-            logger.exception("Failed to render webserver_config.py")
-            return None
-
-    @property
     def _airflow_config_template(self) -> str:
         """Airflow config template merged with additional runtime compiled configs."""
         return self._config_generator.config_template_with_extra_config(
@@ -615,11 +593,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             sensitive_data: dict = {
                 **self._config_generator.sensitive_config_values,
+                **self._webserver_config_generator.sensitive_values,
                 "render_sensitive_data": True,
             }
-            webserver_cfg = self._webserver_config_content
-            if webserver_cfg:
-                sensitive_data["webserver_config_content"] = webserver_cfg
 
             # We can decide which extra config we want to pass to the config_generator
             # Right now we only have one extra, but in the future we can make decisions
@@ -627,6 +603,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._config_provider.set_airflow_config(
                 self._airflow_config_template,
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
+                webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
             )

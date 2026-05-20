@@ -6,8 +6,11 @@
 import logging
 import pathlib
 
+import ops
 from charms.hydra.v0.oauth import OauthProviderConfig
 from jinja2 import Environment, FileSystemLoader, TemplateError
+
+import constants
 
 logger = logging.getLogger(__name__)
 
@@ -53,62 +56,108 @@ def _build_roles_mapping(idp_group_config: dict[str, str]) -> dict[str, list[str
     return mapping
 
 
-def render_webserver_config(
-    provider_info: OauthProviderConfig,
-    api_base_url: str,
-    idp_group_config: dict[str, str],
-) -> str:
-    """Render webserver_config.py from the Jinja2 template.
+class WebserverConfigGenerator:
+    """Encapsulate webserver_config.py generation logic for OAuth integration.
 
-    Args:
-        provider_info: OAuth provider data returned by OAuthRequirer.get_provider_info().
-        api_base_url: Base URL of the Airflow API server, used as redirect URI.
-        idp_group_config: Mapping of lowercase Airflow role name (e.g. "admin", "op")
-            to a comma-delimited string of external IdP group names. Unknown keys are
-            logged and skipped; missing keys produce no mapping entries for that role.
-
-    Returns:
-        Rendered webserver_config.py content as a string.
-
-    Raises:
-        WebserverConfigError: If required provider fields are missing or template
-            rendering fails.
+    Mirrors the structure of AirflowConfigGenerator: produces a Jinja2 template
+    string (non-sensitive values baked in, client_secret as a placeholder) and a
+    separate dict of sensitive values for inclusion in the relation secret.
     """
-    missing = [
-        field
-        for field in (
-            "client_id",
-            "client_secret",
-            "scope",
-            "token_endpoint",
-            "authorization_endpoint",
-            "jwks_endpoint",
-        )
-        if not getattr(provider_info, field, None)
-    ]
-    if missing:
-        raise WebserverConfigError(
-            f"OauthProviderConfig is missing required fields: {', '.join(missing)}"
-        )
 
-    if not api_base_url:
-        raise WebserverConfigError("api_base_url must not be empty")
+    def __init__(self, charm: ops.CharmBase):
+        self._charm = charm
 
-    auth_roles_mapping = _build_roles_mapping(idp_group_config)
+    @property
+    def _provider_info(self) -> OauthProviderConfig | None:
+        """Return provider info when OAuth is active, otherwise None."""
+        if not self._charm._oauth_active:
+            return None
+        try:
+            return self._charm._oauth_requirer.get_provider_info()
+        except Exception:
+            logger.exception("Error retrieving OAuth provider info for webserver config")
+            return None
 
-    try:
-        templates_dir = pathlib.Path(__file__).parent / "templates"
-        env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
-        template = env.get_template("webserver_config.py.j2")
-        return template.render(
-            client_id=provider_info.client_id,
-            client_secret=provider_info.client_secret,
-            api_base_url=api_base_url,
-            scope=provider_info.scope,
-            token_endpoint=provider_info.token_endpoint,
-            authorization_endpoint=provider_info.authorization_endpoint,
-            jwks_endpoint=provider_info.jwks_endpoint,
-            auth_roles_mapping=auth_roles_mapping,
-        )
-    except TemplateError as e:
-        raise WebserverConfigError(f"Failed to render webserver_config template: {e}") from e
+    @property
+    def _idp_group_config(self) -> dict[str, str]:
+        """Return the IDP group config from charm config as a role→groups mapping."""
+        return {
+            "admin": str(self._charm.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_ADMIN, "")),
+            "op": str(self._charm.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_OP, "")),
+            "user": str(self._charm.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_USER, "")),
+            "viewer": str(self._charm.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_VIEWER, "")),
+            "public": str(self._charm.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_PUBLIC, "")),
+        }
+
+    @property
+    def webserver_config_template(self) -> str | None:
+        """Render the webserver config Jinja2 template with non-sensitive values baked in.
+
+        Returns a Python source string that still contains the Jinja2 placeholder
+        ``{{ webserver_config__client_secret }}`` for the OAuth client secret.
+        This template is distributed to core charms via the coordinator relation
+        and rendered downstream with the actual secret value.
+
+        Returns None when OAuth is not active or required fields are missing.
+        """
+        provider_info = self._provider_info
+        if not provider_info:
+            return None
+
+        missing = [
+            field
+            for field in (
+                "client_id",
+                "scope",
+                "token_endpoint",
+                "authorization_endpoint",
+                "jwks_endpoint",
+            )
+            if not getattr(provider_info, field, None)
+        ]
+        if missing:
+            logger.warning(
+                "OauthProviderConfig missing required fields: %s — cannot render webserver config",
+                missing,
+            )
+            return None
+
+        api_base_url = self._charm._config_generator._api_server_base_url
+        if not api_base_url:
+            logger.warning("api_base_url is empty; cannot render webserver config template")
+            return None
+
+        auth_roles_mapping = _build_roles_mapping(self._idp_group_config)
+
+        try:
+            templates_dir = pathlib.Path(__file__).parent / "templates"
+            env = Environment(loader=FileSystemLoader(str(templates_dir)), autoescape=False)
+            template = env.get_template("webserver_config.py.j2")
+            return template.render(
+                client_id=provider_info.client_id,
+                # client_secret stays as a Jinja2 placeholder so that downstream
+                # charms render it with the actual secret from sensitive_data.
+                webserver_config__client_secret="{{ webserver_config__client_secret }}",
+                api_base_url=api_base_url,
+                scope=provider_info.scope,
+                token_endpoint=provider_info.token_endpoint,
+                authorization_endpoint=provider_info.authorization_endpoint,
+                jwks_endpoint=provider_info.jwks_endpoint,
+                auth_roles_mapping=auth_roles_mapping,
+            )
+        except TemplateError as e:
+            logger.exception("Failed to render webserver_config template: %s", e)
+            return None
+
+    @property
+    def sensitive_values(self) -> dict[str, str]:
+        """Return the sensitive values required to render the webserver config template.
+
+        Keys follow the ``section__key`` convention used by other sensitive config
+        values.  Returns an empty dict when OAuth is not active or the provider
+        has not yet shared a client_secret.
+        """
+        provider_info = self._provider_info
+        if not provider_info or not provider_info.client_secret:
+            return {}
+        return {"webserver_config__client_secret": provider_info.client_secret}

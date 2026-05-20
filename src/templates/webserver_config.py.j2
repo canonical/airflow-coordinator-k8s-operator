@@ -19,7 +19,7 @@ OAUTH_PROVIDERS = [
         "token_key": "access_token",
         "remote_app": {
             "client_id": "{{ client_id }}",
-            "client_secret": "{{ client_secret }}",
+            "client_secret": "{{ webserver_config__client_secret }}",
             "api_base_url": "{{ api_base_url }}",
             "client_kwargs": {
                 "scope": "{{ scope }}",

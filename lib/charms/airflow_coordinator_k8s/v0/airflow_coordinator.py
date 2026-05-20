@@ -165,7 +165,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 7
+LIBPATCH = 8
 
 
 logger = logging.getLogger(__name__)
@@ -271,6 +271,7 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
     # to a much more generic one.
     config_template: str | dict | None = None
     kubernetes_executor_pod_spec: str | None = None
+    webserver_config_template: str | None = None
     sensitive_data: SensitiveDataSecretStr = None
     secret_sensitive_data: data_interfaces.SecretString | None = None
 
@@ -659,6 +660,7 @@ class AirflowCoordinatorProviderEventHandler(
         self,
         config_template: str = None,
         kubernetes_executor_pod_spec: str = None,
+        webserver_config_template: str = None,
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
     ):
@@ -685,6 +687,7 @@ class AirflowCoordinatorProviderEventHandler(
                         model.config_template = config_template
 
                     model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
+                    model.webserver_config_template = webserver_config_template
 
                     if sensitive_data:
                         model.sensitive_data = json.dumps(sensitive_data)
@@ -699,6 +702,7 @@ class AirflowCoordinatorProviderEventHandler(
                 model = AirflowCoordinatorProviderModel(
                     config_template=config_template,
                     kubernetes_executor_pod_spec=kubernetes_executor_pod_spec,
+                    webserver_config_template=webserver_config_template,
                     sensitive_data=json.dumps(sensitive_data),
                     tls_ca_chains=tls_ca_chains,
                 )
@@ -726,6 +730,7 @@ class AirflowCoordinatorProviderEventHandler(
 
                     model.config_template = None
                     model.kubernetes_executor_pod_spec = None
+                    model.webserver_config_template = None
                     # a truthy value assigned to avoid underlying secret from being deleted
                     model.sensitive_data = json.dumps({})
 
@@ -1007,6 +1012,46 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
         )
 
     @property
+    def can_write_webserver_config(self) -> bool:
+        """Indicate if it is safe to write webserver_config.py to the workload container.
+
+        Returns True when pebble is reachable, the relation is ready (no validation
+        errors), and the coordinator has shared a webserver config template and
+        sensitive data.
+        """
+        if not self._workload_container.can_connect():
+            return False
+        content = self._requirer_handler.provider_content
+        return bool(
+            self._ready
+            and content
+            and content.webserver_config_template
+            and content.sensitive_data
+        )
+
+    def webserver_config_needs_update(self, filepath: str) -> bool:
+        """Check whether the rendered webserver config differs from the file on disk."""
+        provider_content = self._requirer_handler.provider_content
+        rendered = jinja2.Template(provider_content.webserver_config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
+
+        if self._workload_container.exists(filepath):
+            on_disk = self._workload_container.pull(filepath).read()
+        else:
+            on_disk = None
+
+        return on_disk != rendered
+
+    def write_webserver_config(self, filepath: str, user: str, group: str) -> None:
+        """Render and write webserver_config.py in the workload container."""
+        provider_content = self._requirer_handler.provider_content
+        rendered = jinja2.Template(provider_content.webserver_config_template).render(
+            **json.loads(provider_content.sensitive_data)
+        )
+        self._workload_container.push(filepath, rendered, user=user, group=group, make_dirs=True)
+
+    @property
     def can_write_tls_ca_chain(self) -> bool:
         """Indicate if there exist tls ca chains to write to workload container.
 
@@ -1185,6 +1230,7 @@ class AirflowCoordinatorProvides(ops.Object):
         self,
         config_template: typing.Optional[str] = None,
         k8s_executor_pod_spec_template: typing.Optional[str] = None,
+        webserver_config_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
     ) -> None:
@@ -1193,6 +1239,7 @@ class AirflowCoordinatorProvides(ops.Object):
         Args:
             config_template: Airflow config as a Jinja2 template string.
             k8s_executor_pod_spec_template: (optional) K8s executor pod spec template.
+            webserver_config_template: (optional) Webserver config template for FAB OAuth.
             sensitive_data: sensitive data to render config of k8s executor pod
                 spec jinja templates with.
             tls_ca_chains: mapping from filename to tls ca chain file contents
@@ -1200,6 +1247,7 @@ class AirflowCoordinatorProvides(ops.Object):
         self._provider_handler.update_content(
             config_template=config_template,
             kubernetes_executor_pod_spec=k8s_executor_pod_spec_template,
+            webserver_config_template=webserver_config_template,
             sensitive_data=sensitive_data,
             tls_ca_chains=tls_ca_chains,
         )
