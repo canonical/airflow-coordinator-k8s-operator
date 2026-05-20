@@ -185,6 +185,16 @@ class AirflowConfigGenerator:
         }
 
     @property
+    def auth_manager_config(self) -> dict[str, dict[str, str]]:
+        """Return the FAB auth manager config when OAuth is active, otherwise empty dict.
+
+        Uses the same {section: {key: value}} pattern as other extra configs.
+        """
+        if not self._charm._oauth_active:
+            return {}
+        return {"core": {"auth_manager": constants.FAB_AUTH_MANAGER_CLASS}}
+
+    @property
     def dag_bundle_config(self) -> dict[str, dict[str, str]]:
         """Return the DAG processor config as extra config sections.
 

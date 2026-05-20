@@ -65,6 +65,10 @@ requires:
     interface: s3
   git:
     interface: git
+  oauth:
+    interface: oauth
+    limit: 1
+    optional: true
 
 peers:
   coordinator-peers:
@@ -135,3 +139,28 @@ config:
         Value for triggerer.capacity in airflow.cfg file
 
         Number of triggers a single triggerer will run at once by default
+    external_idp_groups_for_admin:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow admin role
+    external_idp_groups_for_op:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow op role
+    external_idp_groups_for_user:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow user role
+    external_idp_groups_for_viewer:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow viewer role
+    external_idp_groups_for_public:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow public role

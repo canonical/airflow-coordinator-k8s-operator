@@ -16,12 +16,15 @@ import charms.git_integrator.v0.git as git
 import mergedeep
 import object_storage
 import ops
+from charms.hydra.v0.oauth import ClientConfig, OAuthRequirer
 from ops.pebble import LayerDict
 
 import command_executor
 import config_generator
 import connection_manager
 import constants
+import webserver_config_generator
+from webserver_config_generator import WebserverConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._s3_requires.on.storage_connection_info_gone,
         ]:
             self.framework.observe(event, self._reconcile)
+
+        # OAuthRequirer is instantiated with a placeholder redirect_uri; the
+        # real URL (derived from the api-server relation) is kept up to date on
+        # every reconcile via update_client_config() once the relation is ready.
+        self._oauth_requirer = OAuthRequirer(
+            self,
+            relation_name=constants.OAUTH_RELATION_ENDPOINT,
+        )
+        self.framework.observe(self._oauth_requirer.on.oauth_info_changed, self._reconcile)
+        self.framework.observe(self._oauth_requirer.on.oauth_info_removed, self._reconcile)
 
     @property
     def _all_database_connection_details_present(self) -> bool:
@@ -325,6 +338,40 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return content.kubernetes_executor_pod_spec
 
     @property
+    def _oauth_active(self) -> bool:
+        """Return True when the oauth relation has valid provider credentials."""
+        if not self.model.get_relation(constants.OAUTH_RELATION_ENDPOINT):
+            return False
+        try:
+            provider_info = self._oauth_requirer.get_provider_info()
+        except Exception:
+            logger.exception("Error retrieving OAuth provider info")
+            return False
+        return bool(provider_info and provider_info.client_id and provider_info.client_secret)
+
+    @property
+    def _webserver_config_content(self) -> str | None:
+        """Render webserver_config.py content, or None when OAuth is not active."""
+        if not self._oauth_active:
+            return None
+        try:
+            provider_info = self._oauth_requirer.get_provider_info()
+            return webserver_config_generator.render_webserver_config(
+                provider_info=provider_info,
+                api_base_url=self._config_generator._api_server_base_url,
+                idp_group_config={
+                    "admin": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_ADMIN, "")),
+                    "op": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_OP, "")),
+                    "user": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_USER, "")),
+                    "viewer": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_VIEWER, "")),
+                    "public": str(self.config.get(constants.EXTERNAL_IDP_GROUPS_FOR_PUBLIC, "")),
+                },
+            )
+        except WebserverConfigError:
+            logger.exception("Failed to render webserver_config.py")
+            return None
+
+    @property
     def _airflow_config_template(self) -> str:
         """Airflow config template merged with additional runtime compiled configs."""
         return self._config_generator.config_template_with_extra_config(
@@ -334,6 +381,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 self._config_generator.dag_bundle_config,
                 (self._kubernetes_executor_config or {}),
                 self._config_generator.coordinator_charm_core_config,
+                self._config_generator.auth_manager_config,
             ),
         )
 
@@ -538,6 +586,21 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         try:
             self._perform_checks()
             self._ensure_airflow_keys_generated()
+
+            # Keep the OAuth redirect_uri in sync with the current API server URL
+            # now that _perform_checks() guarantees the API server relation is ready.
+            if self.model.get_relation(constants.OAUTH_RELATION_ENDPOINT):
+                try:
+                    self._oauth_requirer.update_client_config(
+                        ClientConfig(
+                            redirect_uri=self._config_generator._api_server_base_url,
+                            scope="openid email profile offline",
+                            grant_types=["authorization_code", "refresh_token"],
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to update OAuth client config")
+
             self._configure_pebble_layer()
             self._write_airflow_config()
 
@@ -550,16 +613,21 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             self._reconcile_dag_bundle_remote_connections()
 
+            sensitive_data: dict = {
+                **self._config_generator.sensitive_config_values,
+                "render_sensitive_data": True,
+            }
+            webserver_cfg = self._webserver_config_content
+            if webserver_cfg:
+                sensitive_data["webserver_config_content"] = webserver_cfg
+
             # We can decide which extra config we want to pass to the config_generator
             # Right now we only have one extra, but in the future we can make decisions
             # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
                 self._airflow_config_template,
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
-                sensitive_data={
-                    **self._config_generator.sensitive_config_values,
-                    "render_sensitive_data": True,
-                },
+                sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
             )
 

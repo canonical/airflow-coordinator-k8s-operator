@@ -61,3 +61,15 @@ AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
 
 FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
 FERNET_KEY = "fernet-key"
+
+OAUTH_RELATION_ENDPOINT = "oauth"
+WEBSERVER_CONFIG_PATH = f"{AIRFLOW_HOME}/webserver_config.py"
+FAB_AUTH_MANAGER_CLASS = "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"
+
+EXTERNAL_IDP_GROUPS_FOR_ADMIN = "external_idp_groups_for_admin"
+EXTERNAL_IDP_GROUPS_FOR_OP = "external_idp_groups_for_op"
+EXTERNAL_IDP_GROUPS_FOR_USER = "external_idp_groups_for_user"
+EXTERNAL_IDP_GROUPS_FOR_VIEWER = "external_idp_groups_for_viewer"
+EXTERNAL_IDP_GROUPS_FOR_PUBLIC = "external_idp_groups_for_public"
+
+WAITING_FOR_OAUTH_PROVIDER_INFO_MESSAGE = "Waiting for OAuth provider info from relation"
