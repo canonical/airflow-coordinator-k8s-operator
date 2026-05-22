@@ -5,6 +5,7 @@
 
 import abc
 import dataclasses
+import io
 import json
 import logging
 import pathlib
@@ -13,6 +14,7 @@ import typing
 import unittest
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
+import jinja2
 import ops
 import ops.testing
 import pytest
@@ -184,6 +186,7 @@ def valid_relation_data(coordinator_relation_secret):
                 "/file2": "chain2\nchain3",
             }
         ),
+        "webserver-config-template": "test-webserver-config: {{ secret }}",
     }
 
 
@@ -1033,6 +1036,159 @@ class TestAirflowCoordinatorCoreRequires:
                     ),
                 ]
 
+    def test_can_write_webserver_config_container_not_connectable(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        application_workload_container,
+    ):
+        container_not_ready = dataclasses.replace(
+            application_workload_container, can_connect=False
+        )
+        state = dataclasses.replace(application_state, containers=[container_not_ready])
+
+        with application_context(
+            application_context.on.relation_changed(application_airflow_coordinator_relation),
+            state,
+        ) as manager:
+            manager.run()
+            assert not manager.charm.requirer.can_write_webserver_config
+
+    def test_can_write_webserver_config_provider_data_not_present(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        valid_relation_data,
+    ):
+        relation_data_without_webserver_config = valid_relation_data
+        relation_data_without_webserver_config.pop("webserver-config-template", None)
+
+        relation_without_webserver_config = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data=relation_data_without_webserver_config,
+        )
+
+        state_without_webserver_config = dataclasses.replace(
+            application_state, relations=[relation_without_webserver_config]
+        )
+
+        with application_context(
+            application_context.on.relation_changed(relation_without_webserver_config),
+            state_without_webserver_config,
+        ) as manager:
+            manager.run()
+            assert not manager.charm.requirer.can_write_webserver_config
+
+    @pytest.mark.parametrize(
+        [
+            "disk_file_exists",
+            "disk_content",
+            "relation_content",
+            "update_required",
+            "expected_error",
+        ],
+        [
+            pytest.param(
+                False, None, None, False, False, id="no_disk_content_no_relation_content"
+            ),
+            pytest.param(
+                False, None, "content1", True, False, id="no_disk_content_relation_content_exists"
+            ),
+            pytest.param(
+                True,
+                io.StringIO("content1"),
+                "content1",
+                False,
+                False,
+                id="disk_and_relation_content_same",
+            ),
+            pytest.param(
+                True,
+                io.StringIO("content1"),
+                "content2",
+                True,
+                False,
+                id="relation_content_different_than_disk",
+            ),
+            pytest.param(
+                True,
+                io.StringIO("content1"),
+                None,
+                True,
+                False,
+                id="disk_content_no_relation_content",
+            ),
+            pytest.param(
+                True,
+                ops.pebble.PathError("test", "test error"),
+                "content2",
+                None,
+                ops.pebble.PathError,
+                id="error_retrieving_disk_content",
+            ),
+            pytest.param(
+                True,
+                "content1",
+                jinja2.exceptions.TemplateSyntaxError("test-error", lineno=1),
+                None,
+                jinja2.exceptions.TemplateSyntaxError,
+                id="error_rendering_relation_content",
+            ),
+        ],
+    )
+    def test_webserver_config_needs_update_unchanged_contents(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        disk_file_exists,
+        disk_content,
+        relation_content,
+        update_required,
+        expected_error,
+    ):
+        with (
+            unittest.mock.patch("ops.Container.exists", return_value=disk_file_exists),
+            unittest.mock.patch("ops.Container.pull", side_effect=[disk_content]),
+            unittest.mock.patch.object(jinja2.Template, "render", side_effect=[relation_content]),
+        ):
+            with application_context(
+                application_context.on.relation_changed(application_airflow_coordinator_relation),
+                application_state,
+            ) as manager:
+                if expected_error:
+                    with pytest.raises(expected_error):
+                        manager.charm.requirer.webserver_config_needs_update("/test/file")
+                else:
+                    assert (
+                        manager.charm.requirer.webserver_config_needs_update("/test/file")
+                        == update_required
+                    )
+
+    def test_wrtie_webserver_config(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+    ):
+        with (
+            unittest.mock.patch.object(
+                jinja2.Template, "render", side_effect=["relation-content"]
+            ),
+            unittest.mock.patch("ops.Container.push") as mock_push,
+        ):
+            with application_context(
+                application_context.on.relation_changed(application_airflow_coordinator_relation),
+                application_state,
+            ) as manager:
+                manager.charm.requirer.write_webserver_config("/test/file", "ubuntu", "ubuntu")
+
+                mock_push.assert_called_once_with(
+                    "/test/file", "relation-content", user="ubuntu", group="ubuntu", make_dirs=True
+                )
+
 
 class TestAirflowCoordinatorProvides:
     def get_juju_log_line(self, log_level: str, event: ops.EventBase):
@@ -1225,6 +1381,7 @@ class TestAirflowCoordinatorProvides:
                     "secret": "s3cret",
                 },
                 "tls_ca_chains": tls_ca_chains,
+                "webserver_config_template": "test-webserver-config-template",
             }
 
             assert manager.charm.provider.set_airflow_config(**airflow_config_params) is None
@@ -1257,3 +1414,8 @@ class TestAirflowCoordinatorProvides:
                 }
 
                 assert relation.local_app_data["tls-ca-chains"] == json.dumps(tls_ca_chains)
+
+                assert (
+                    relation.local_app_data["webserver-config-template"]
+                    == airflow_config_params["webserver_config_template"]
+                )

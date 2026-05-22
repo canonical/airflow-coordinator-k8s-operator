@@ -211,7 +211,7 @@ class AirflowConfigGenerator:
         return {
             "dag_processor": {
                 "dag_bundle_config_list": json.dumps(
-                    s3_dag_bundles + git_dag_bundles,
+                    sorted(s3_dag_bundles + git_dag_bundles, key=lambda element: element["name"]),
                     indent=4,
                 ),
             },

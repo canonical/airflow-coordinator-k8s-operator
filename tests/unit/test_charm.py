@@ -531,10 +531,12 @@ class TestDagBundles:
                         "prefix": connection_info["path"],
                     },
                 }
-                for relation_id, connection_info in {
-                    s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
-                    s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
-                }.items()
+                for relation_id, connection_info in sorted(
+                    {
+                        s3_integrator_relation.id: s3_integrator_relation.remote_app_data,
+                        s3_integrator_relation2.id: s3_integrator_relation2.remote_app_data,
+                    }.items()
+                )
             ]
 
     def test_valid_s3_relations_non_leader(self, context, state_without_git):
