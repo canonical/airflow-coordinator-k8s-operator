@@ -1130,7 +1130,7 @@ class TestAirflowCoordinatorCoreRequires:
             ),
             pytest.param(
                 True,
-                "content1",
+                io.StringIO("content1"),
                 jinja2.exceptions.TemplateSyntaxError("test-error", lineno=1),
                 None,
                 jinja2.exceptions.TemplateSyntaxError,
@@ -1151,7 +1151,7 @@ class TestAirflowCoordinatorCoreRequires:
     ):
         with (
             unittest.mock.patch("ops.Container.exists", return_value=disk_file_exists),
-            unittest.mock.patch("ops.Container.pull", side_effect=[disk_content]),
+            unittest.mock.patch.object(ops.Container, "pull", side_effect=[disk_content]),
             unittest.mock.patch.object(jinja2.Template, "render", side_effect=[relation_content]),
         ):
             with application_context(
@@ -1167,7 +1167,7 @@ class TestAirflowCoordinatorCoreRequires:
                         == update_required
                     )
 
-    def test_wrtie_webserver_config(
+    def test_write_webserver_config(
         self,
         application_context,
         application_state,

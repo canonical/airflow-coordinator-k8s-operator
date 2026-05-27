@@ -1035,27 +1035,32 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             and content.sensitive_data
         )
 
-    def webserver_config_needs_update(self, filepath: str) -> bool:
-        """Check whether the rendered webserver config differs from the file on disk."""
+    @property
+    def _webserver_config_from_relation(self) -> str:
+        """Render the webserver_config.py."""
         provider_content = self._requirer_handler.provider_content
-        rendered = jinja2.Template(provider_content.webserver_config_template).render(
+
+        return jinja2.Template(provider_content.webserver_config_template).render(
             **json.loads(provider_content.sensitive_data)
         )
 
+    def webserver_config_needs_update(self, filepath: str) -> bool:
+        """Check if webserver config file needs to be updated on workload container.
+
+        Return True if the rendered webserver config differs from the file on disk; False otherwise
+        """
         if self._workload_container.exists(filepath):
             on_disk = self._workload_container.pull(filepath).read()
         else:
             on_disk = None
 
-        return on_disk != rendered
+        return on_disk != self._webserver_config_from_relation
 
     def write_webserver_config(self, filepath: str, user: str, group: str) -> None:
         """Render and write webserver_config.py in the workload container."""
-        provider_content = self._requirer_handler.provider_content
-        rendered = jinja2.Template(provider_content.webserver_config_template).render(
-            **json.loads(provider_content.sensitive_data)
+        self._workload_container.push(
+            filepath, self._webserver_config_from_relation, user=user, group=group, make_dirs=True
         )
-        self._workload_container.push(filepath, rendered, user=user, group=group, make_dirs=True)
 
     @property
     def can_write_tls_ca_chain(self) -> bool:
