@@ -7,6 +7,7 @@ AIRFLOW_COORDINATOR_RELATION_NAME = "airflow-coordinator"
 AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
 S3_ENDPOINT_NAME = "s3"
 GIT_ENDPOINT_NAME = "git"
+OAUTH_ENDPOINT_NAME = "oauth"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"

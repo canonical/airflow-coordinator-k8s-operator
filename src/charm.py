@@ -13,6 +13,7 @@ import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import charms.git_integrator.v0.git as git
+import charms.hydra.v0.oauth as oauth
 import mergedeep
 import object_storage
 import ops
@@ -79,6 +80,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             callback=self._reconcile,
         )
 
+        self._oauth_requirer = oauth.OAuthRequirer(
+            self, relation_name=constants.OAUTH_ENDPOINT_NAME
+        )
+
         for event in [
             self.on.start,
             self.on.config_changed,
@@ -90,6 +95,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
+            self._oauth_requirer.on.oauth_info_changed,
+            self._oauth_requirer.on.oauth_info_removed,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -323,6 +330,20 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             logger.warning(constants.WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE)
             return None
         return content.kubernetes_executor_pod_spec
+
+    @property
+    def _oauth_active(self) -> bool:
+        """Return True when the oauth relation has valid provider credentials."""
+        if not self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
+            return False
+
+        try:
+            provider_info = self._oauth_requirer.get_provider_info()
+        except Exception:
+            logger.exception("Error retrieving OAuth provider info")
+            return False
+
+        return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
     @property
     def _airflow_config_template(self) -> str:

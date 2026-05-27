@@ -32,6 +32,7 @@ unit = [
     "ops[testing]",
     "pytest",
     "cryptography>=41.0",
+    "jsonschema>=4.26.0",
 ]
 # Dependencies of integration tests
 integration = [

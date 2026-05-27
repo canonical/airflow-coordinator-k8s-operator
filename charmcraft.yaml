@@ -65,6 +65,10 @@ requires:
     interface: s3
   git:
     interface: git
+  oauth:
+    interface: oauth
+    limit: 1
+    optional: true
 
 peers:
   coordinator-peers:
