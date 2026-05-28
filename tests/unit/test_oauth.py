@@ -67,6 +67,7 @@ def test_oauth_relation(context, state_with_oauth, oauth_relation):
     assert state_out.unit_status == ops.ActiveStatus()
 
 
+# TODO: further refine assertions as the feature is incrementally implemented
 def test_oauth_config_changes(context, state_with_oauth):
     """Stub to be further refined as integration with OAuth fully implemented."""
     state_with_oauth_and_configs = dataclasses.replace(
