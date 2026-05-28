@@ -139,3 +139,32 @@ config:
         Value for triggerer.capacity in airflow.cfg file
 
         Number of triggers a single triggerer will run at once by default
+    idp_groups_for_admin:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow admin role
+    idp_groups_for_op:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow op role
+    idp_groups_for_user:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow user role
+    idp_groups_for_viewer:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow viewer role
+    idp_groups_for_public:
+      type: string
+      default: ""
+      description: |
+        Comma delimited list of groups in the external identity provider that maps to the Airflow public role
+    enable_user_registration:
+      type: boolean
+      default: true
+      description: Enable user self registration from the Web UI
