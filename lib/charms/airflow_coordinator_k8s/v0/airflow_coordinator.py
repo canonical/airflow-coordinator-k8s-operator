@@ -275,16 +275,16 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
     # (str from coordinator) and structured config dicts (from executor, deserialized
     # by data_interfaces' get_data). This will change when we refactor the library
     # to a much more generic one.
-    config_template: str | dict | None = None
-    kubernetes_executor_pod_spec: str | None = None
-    webserver_config_template: str | None = None
+    config_template: typing.Optional[str | dict] = None
+    kubernetes_executor_pod_spec: typing.Optional[str] = None
+    webserver_config_template: typing.Optional[str] = None
     sensitive_data: SensitiveDataSecretStr = None
-    secret_sensitive_data: data_interfaces.SecretString | None = None
+    secret_sensitive_data: typing.Optional[data_interfaces.SecretString] = None
 
-    validation_failures: str | None = None
+    validation_failures: typing.Optional[str] = None
 
     # CA chains for Airflow connections
-    tls_ca_chains: dict[str, str] | None = None
+    tls_ca_chains: typing.Optional[dict[str, str]] = None
 
     # hack to enable databag diff computation with data_interfaces v1 charm lib
     request_id: str = pydantic.Field(default="fixed_request_id", exclude=True)
@@ -322,8 +322,8 @@ class AirflowCoordinatorEvent(ops.EventBase, typing.Generic[TAirflowCoordinatorM
         self,
         handle: ops.Handle,
         relation: ops.Relation,
-        app: ops.Application | None,
-        unit: ops.Unit | None,
+        app: typing.Optional[ops.Application],
+        unit: typing.Optional[ops.Unit],
         content: TAirflowCoordinatorModels,
     ):
         super().__init__(handle)
@@ -666,7 +666,7 @@ class AirflowCoordinatorProviderEventHandler(
         self,
         config_template: str = None,
         kubernetes_executor_pod_spec: str = None,
-        webserver_config_template: str = None,
+        webserver_config_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
     ):

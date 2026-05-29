@@ -1138,7 +1138,7 @@ class TestAirflowCoordinatorCoreRequires:
             ),
         ],
     )
-    def test_webserver_config_needs_update_unchanged_contents(
+    def test_webserver_config_needs_update(
         self,
         application_context,
         application_state,
