@@ -11,7 +11,7 @@ import pytest
 
 import constants
 
-OAUTH_CLIENT_ID = "grafana_client_id"
+OAUTH_CLIENT_ID = "airflow_client_id"
 OAUTH_CLIENT_SECRET = "s3cR#T"
 OAUTH_PROVIDER_INFO = {
     "authorization_endpoint": "https://example.oidc.com/oauth2/auth",
