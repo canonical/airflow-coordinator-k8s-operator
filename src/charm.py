@@ -344,9 +344,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         try:
             provider_info = self._oauth_requirer.get_provider_info()
         except Exception:
-            # TODO: see if this exception should set blocked status
-            logger.exception("Error retrieving OAuth provider info")
-            return False
+            raise ExceptionWithStatusError(
+                constants.INVALID_OAUTH_RELATION_MESSAGE,
+                ops.BlockedStatus,
+            )
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 

@@ -82,4 +82,6 @@ IDP_GROUPS_CONFIGS = [
 
 OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE = "Failed to update OAuth client config"
 WAITING_FOR_OAUTH_PROVIDER_INFO_MESSAGE = "Waiting for OAuth provider info from relation"
+INVALID_OAUTH_RELATION_MESSAGE = "Invalid OAuth relation data"
+
 FAB_AUTH_MANAGER_CLASS = "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"

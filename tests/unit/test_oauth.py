@@ -222,11 +222,11 @@ class TestOAuth:
         with unittest.mock.patch.object(
             oauth.OAuthRequirer,
             "get_provider_info",
-            side_effect=Exception("provider not ready"),
+            side_effect=Exception("Invalid oauth provider config in relation"),
         ):
             state_out = context.run(context.on.start(), state_with_oauth)
 
-        assert state_out.unit_status == ops.ActiveStatus()
+        assert state_out.unit_status == ops.BlockedStatus(constants.INVALID_OAUTH_RELATION_MESSAGE)
 
         for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
             config_template = relation.local_app_data.get("config-template", "")
