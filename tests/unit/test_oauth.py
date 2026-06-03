@@ -9,6 +9,8 @@ import ops
 import ops.testing
 import pytest
 
+import constants
+
 OAUTH_CLIENT_ID = "airflow_client_id"
 OAUTH_CLIENT_SECRET = "s3cR#T"
 OAUTH_PROVIDER_INFO = {
@@ -49,6 +51,11 @@ def state_with_oauth(state, oauth_relation, oauth_client_secret):
         state,
         relations=[*state.relations, oauth_relation],
         secrets=[*state.secrets, oauth_client_secret],
+        config={
+            **state.config,
+            constants.IDP_GROUPS_FOR_ADMIN_CONFIG: "group1,,group2",
+            constants.IDP_GROUPS_FOR_USER_CONFIG: "group3",
+        },
     )
 
 
@@ -56,5 +63,21 @@ def state_with_oauth(state, oauth_relation, oauth_client_secret):
 def test_oauth_relation(context, state_with_oauth, oauth_relation):
     """Stub to be further refined as integration with OAuth fully implemented."""
     state_out = context.run(context.on.relation_changed(oauth_relation), state_with_oauth)
+
+    assert state_out.unit_status == ops.ActiveStatus()
+
+
+# TODO: further refine assertions as the feature is incrementally implemented
+def test_oauth_config_changes(context, state_with_oauth):
+    """Stub to be further refined as integration with OAuth fully implemented."""
+    state_with_oauth_and_configs = dataclasses.replace(
+        state_with_oauth,
+        config={
+            **state_with_oauth.config,
+            constants.IDP_GROUPS_FOR_OP_CONFIG: "group4",
+        },
+    )
+
+    state_out = context.run(context.on.config_changed(), state_with_oauth_and_configs)
 
     assert state_out.unit_status == ops.ActiveStatus()

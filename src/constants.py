@@ -62,3 +62,19 @@ AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
 
 FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
 FERNET_KEY = "fernet-key"
+
+IDP_GROUPS_FOR_ADMIN_CONFIG = "idp_groups_for_admin"
+IDP_GROUPS_FOR_OP_CONFIG = "idp_groups_for_op"
+IDP_GROUPS_FOR_USER_CONFIG = "idp_groups_for_user"
+IDP_GROUPS_FOR_VIEWER_CONFIG = "idp_groups_for_viewer"
+IDP_GROUPS_FOR_PUBLIC_CONFIG = "idp_groups_for_public"
+
+ENABLE_USER_REGISTRATION_CONFIG = "enable_user_registration"
+
+IDP_GROUPS_CONFIGS = [
+    IDP_GROUPS_FOR_ADMIN_CONFIG,
+    IDP_GROUPS_FOR_OP_CONFIG,
+    IDP_GROUPS_FOR_USER_CONFIG,
+    IDP_GROUPS_FOR_VIEWER_CONFIG,
+    IDP_GROUPS_FOR_PUBLIC_CONFIG,
+]
