@@ -341,13 +341,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
             return False
 
-        try:
-            provider_info = self._oauth_requirer.get_provider_info()
-        except Exception:
-            raise ExceptionWithStatusError(
-                constants.INVALID_OAUTH_RELATION_MESSAGE,
-                ops.BlockedStatus,
-            )
+        provider_info = self._oauth_requirer.get_provider_info()
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
@@ -439,15 +433,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     ops.BlockedStatus,
                 )
 
-    def _perform_checks(self) -> None:
-        """Checks to ensure the charm is able to generate and distribute configs."""
-        self._validate_configs()
-
-        if not self._container.can_connect():
-            raise ExceptionWithStatusError(
-                constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
-            )
-
+    def _perform_database_related_checks(self) -> None:
+        """Check validity of database relation."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
             self._config_provider.set_validation_errors()
             raise ExceptionWithStatusError(
@@ -462,6 +449,26 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self._all_database_connection_details_present:
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_DATABASE_CONNECTION_MESSAGE, ops.WaitingStatus
+            )
+
+    def _perform_checks(self) -> None:
+        """Checks to ensure the charm is able to generate and distribute configs."""
+        self._validate_configs()
+
+        if not self._container.can_connect():
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
+            )
+
+        self._perform_database_related_checks()
+
+        try:
+            # Validates proper oauth relation data if oauth relation exists
+            self._oauth_active
+        except Exception:
+            raise ExceptionWithStatusError(
+                constants.INVALID_OAUTH_RELATION_MESSAGE,
+                ops.BlockedStatus,
             )
 
         if not self.model.get_relation(constants.AIRFLOW_API_SERVER_ENDPOINT_NAME):
@@ -564,7 +571,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             try:
                 self._oauth_requirer.update_client_config(
                     oauth.ClientConfig(
-                        redirect_uri=self._config_generator._api_server_base_url,
+                        redirect_uri=f"{self._config_generator._api_server_base_url}/oauth-authroized/hydra",
                         scope="openid email profile offline",
                         grant_types=["authorization_code", "refresh_token"],
                     )

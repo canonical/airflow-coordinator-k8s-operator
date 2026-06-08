@@ -6,7 +6,7 @@ AUTH_ROLES_SYNC_AT_LOGIN = True
 
 # Enable user registration in addition to authentication with OAuth
 AUTH_USER_REGISTRATION = {{ enable_user_registration }}
-AUTH_USER_REGISTRATION_ROLE = "Viewer"
+AUTH_USER_REGISTRATION_ROLE = "Public"
 
 # Mapping of groups in external IdP to predefined Airflow roles
 AUTH_ROLES_MAPPING = {{ auth_roles_mapping }}
@@ -18,15 +18,15 @@ OAUTH_PROVIDERS = [
         "icon": "fa-key",
         "token_key": "access_token",
         "remote_app": {
-            "client_id": "{{ client_id }}",
+            "client_id": {{ client_id | tojson }},
             "client_secret": "{{ webserver_config__client_secret }}",
-            "api_base_url": "{{ api_base_url }}",
+            "api_base_url": {{ api_base_url | tojson }},
             "client_kwargs": {
-                "scope": "{{ scope }}",
+                "scope": {{ scope | tojson }},
             },
-            "access_token_url": "{{ token_endpoint }}",
-            "authorize_url": "{{ authorization_endpoint }}",
-            "jwks_uri": "{{ jwks_endpoint }}",
+            "access_token_url": {{ token_endpoint | tojson }},
+            "authorize_url": {{ authorization_endpoint | tojson }},
+            "jwks_uri": {{ jwks_endpoint | tojson }},
         },
     }
 ]

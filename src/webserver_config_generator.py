@@ -111,7 +111,7 @@ class WebserverConfigGenerator:
         api_base_url = self._charm._config_generator._api_server_base_url
         if not api_base_url:
             logger.warning("api_base_url is empty; cannot render webserver config template")
-            return WebserverConfigError("api_server_base_url is empty")
+            raise WebserverConfigError("api_server_base_url is empty")
 
         auth_roles_mapping = _build_roles_mapping(
             {
