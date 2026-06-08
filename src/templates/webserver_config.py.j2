@@ -9,7 +9,7 @@ AUTH_USER_REGISTRATION = {{ enable_user_registration }}
 AUTH_USER_REGISTRATION_ROLE = "Public"
 
 # Mapping of groups in external IdP to predefined Airflow roles
-AUTH_ROLES_MAPPING = {{ auth_roles_mapping }}
+AUTH_ROLES_MAPPING = {{ auth_roles_mapping | tojson }}
 
 # Hydra OAuth Provider Configuration
 OAUTH_PROVIDERS = [
