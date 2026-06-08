@@ -75,7 +75,7 @@ lint.ignore = [
 ]
 exclude = ["mock-core-charms/lib"]
 extend-exclude = ["__pycache__", "*.egg_info"]
-lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
+lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104","D205"]}
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

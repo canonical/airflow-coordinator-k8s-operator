@@ -54,6 +54,7 @@ CORE_PARALLELISM_CONFIG = "core_parallelism"
 DAG_PROCESSOR_PARSING_PROCESSES_CONFIG = "dag_processor_parsing_processes"
 DATABASE_SQL_ALCHEMY_POOL_SIZE_CONFIG = "database_sql_alchemy_pool_size"
 TRIGGERER_CAPACITY_CONFIG = "triggerer_capacity"
+ENABLE_USER_REGISTRATION_CONFIG = "enable_user_registration"
 
 INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
 
@@ -69,8 +70,6 @@ IDP_GROUPS_FOR_USER_CONFIG = "idp_groups_for_user"
 IDP_GROUPS_FOR_VIEWER_CONFIG = "idp_groups_for_viewer"
 IDP_GROUPS_FOR_PUBLIC_CONFIG = "idp_groups_for_public"
 
-ENABLE_USER_REGISTRATION_CONFIG = "enable_user_registration"
-
 IDP_GROUPS_CONFIGS = [
     IDP_GROUPS_FOR_ADMIN_CONFIG,
     IDP_GROUPS_FOR_OP_CONFIG,
@@ -78,3 +77,9 @@ IDP_GROUPS_CONFIGS = [
     IDP_GROUPS_FOR_VIEWER_CONFIG,
     IDP_GROUPS_FOR_PUBLIC_CONFIG,
 ]
+
+OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE = "Failed to update OAuth client config"
+WAITING_FOR_OAUTH_PROVIDER_INFO_MESSAGE = "Waiting for OAuth provider info from relation"
+INVALID_OAUTH_RELATION_MESSAGE = "Invalid OAuth relation data"
+
+FAB_AUTH_MANAGER_CLASS = "airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager"

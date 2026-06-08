@@ -23,6 +23,7 @@ import command_executor
 import config_generator
 import connection_manager
 import constants
+import webserver_config_generator
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
+        self._webserver_config_generator = webserver_config_generator.WebserverConfigGenerator(
+            self
+        )
         self._command_executor = command_executor.CommandExecutor(self._container)
         self._connection_manager = connection_manager.AirflowConnectionManager(
             self, self._container
@@ -337,11 +341,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
             return False
 
-        try:
-            provider_info = self._oauth_requirer.get_provider_info()
-        except Exception:
-            logger.exception("Error retrieving OAuth provider info")
-            return False
+        provider_info = self._oauth_requirer.get_provider_info()
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
@@ -355,6 +355,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 self._config_generator.dag_bundle_config,
                 (self._kubernetes_executor_config or {}),
                 self._config_generator.coordinator_charm_core_config,
+                self._config_generator.auth_manager_config,
             ),
         )
 
@@ -432,15 +433,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     ops.BlockedStatus,
                 )
 
-    def _perform_checks(self) -> None:
-        """Checks to ensure the charm is able to generate and distribute configs."""
-        self._validate_configs()
-
-        if not self._container.can_connect():
-            raise ExceptionWithStatusError(
-                constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
-            )
-
+    def _perform_database_related_checks(self) -> None:
+        """Check validity of database relation."""
         if not self.model.get_relation(constants.POSTGRES_RELATION_NAME):
             self._config_provider.set_validation_errors()
             raise ExceptionWithStatusError(
@@ -455,6 +449,26 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         if not self._all_database_connection_details_present:
             raise ExceptionWithStatusError(
                 constants.WAITING_FOR_DATABASE_CONNECTION_MESSAGE, ops.WaitingStatus
+            )
+
+    def _perform_checks(self) -> None:
+        """Checks to ensure the charm is able to generate and distribute configs."""
+        self._validate_configs()
+
+        if not self._container.can_connect():
+            raise ExceptionWithStatusError(
+                constants.WAITING_FOR_CONTAINER_MESSAGE, ops.WaitingStatus
+            )
+
+        self._perform_database_related_checks()
+
+        try:
+            # Validates proper oauth relation data if oauth relation exists
+            self._oauth_active
+        except Exception:
+            raise ExceptionWithStatusError(
+                constants.INVALID_OAUTH_RELATION_MESSAGE,
+                ops.BlockedStatus,
             )
 
         if not self.model.get_relation(constants.AIRFLOW_API_SERVER_ENDPOINT_NAME):
@@ -551,6 +565,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.DB_MIGRATION_FAILED_MESSAGE, ops.BlockedStatus
             )
 
+    def _update_oauth_config(self) -> None:
+        """Update OAuth client config if relation exists."""
+        if self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
+            try:
+                self._oauth_requirer.update_client_config(
+                    oauth.ClientConfig(
+                        redirect_uri=f"{self._config_generator._api_server_base_url}/oauth-authorized/hydra",
+                        scope="openid email profile offline",
+                        grant_types=["authorization_code", "refresh_token"],
+                    )
+                )
+            except Exception:
+                raise ExceptionWithStatusError(
+                    constants.OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE, ops.BlockedStatus
+                )
+
     def _reconcile(self, event: ops.EventBase) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
         if not self.unit.is_leader():
@@ -559,6 +589,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         try:
             self._perform_checks()
             self._ensure_airflow_keys_generated()
+            self._update_oauth_config()
             self._configure_pebble_layer()
             self._write_airflow_config()
 
@@ -571,22 +602,29 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
             self._reconcile_dag_bundle_remote_connections()
 
+            sensitive_data = {
+                **self._config_generator.sensitive_config_values,
+                **self._webserver_config_generator.sensitive_values,
+                "render_sensitive_data": True,
+            }
+
             # We can decide which extra config we want to pass to the config_generator
             # Right now we only have one extra, but in the future we can make decisions
             # based on executors, providers, etc.
             self._config_provider.set_airflow_config(
                 self._airflow_config_template,
                 k8s_executor_pod_spec_template=self._kubernetes_executor_pod_spec,
-                sensitive_data={
-                    **self._config_generator.sensitive_config_values,
-                    "render_sensitive_data": True,
-                },
+                webserver_config_template=self._webserver_config_generator.webserver_config_template,
+                sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
             )
 
         except ExceptionWithStatusError as e:
             logger.error(e)
             self.unit.status = e.status
+            return
+        except webserver_config_generator.WebserverConfigError as e:
+            self.unit.status = ops.BlockedStatus(str(e))
             return
         except command_executor.CommandExecutionError as e:
             logger.error(e)
