@@ -1223,7 +1223,7 @@ class TestAirflowCoordinatorProvides:
 
         with coordinator_waiting_context(
             coordinator_waiting_context.on.relation_changed(
-                state.get_relations("airflow_coordinator")[0]
+                state.get_relations("airflow-coordinator")[0]
             ),
             state,
         ) as manager:
