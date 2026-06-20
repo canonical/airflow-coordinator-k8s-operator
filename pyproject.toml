@@ -32,14 +32,14 @@ unit = [
     "coverage[toml]",
     "ops[testing]",
     "pytest",
-    "cryptography>=41.0",
+    "cryptography>=48.0.1",
 ]
 # Dependencies of integration tests
 integration = [
     "jubilant",
     "pytest",
     "PyYAML",
-    "cryptography>=41.0",
+    "cryptography>=48.0.1",
 ]
 
 # Testing tools configuration
