@@ -14,6 +14,7 @@ import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordina
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import charms.git_integrator.v0.git as git
 import charms.hydra.v0.oauth as oauth
+import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
 import mergedeep
 import object_storage
 import ops
@@ -87,6 +88,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         self._oauth_requirer = oauth.OAuthRequirer(
             self, relation_name=constants.OAUTH_ENDPOINT_NAME
         )
+        self._spark_service_account_requirer = spark_service_account.SparkServiceAccountRequirer(
+            self,
+            relation_name=constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME,
+            service_account=f"{constants.SPARK_NAMESPACE}:{constants.SPARK_USERNAME}",
+            skip_creation=False,
+        )
 
         for event in [
             self.on.start,
@@ -101,6 +108,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
             self._oauth_requirer.on.oauth_info_removed,
+            self._spark_service_account_requirer.on.account_granted,
+            self._spark_service_account_requirer.on.account_gone,
+            self._spark_service_account_requirer.on.properties_changed,
         ]:
             self.framework.observe(event, self._reconcile)
 
@@ -161,6 +171,24 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.WAITING_FOR_PEER_RELATION_MESSAGE, ops.WaitingStatus
             )
         return peer_relation
+
+    # TODO: write a property to return dict with namespace and username
+    @property
+    def get_service_account(self) -> dict | None:
+        """Get spark service account details."""
+        relation = self.model.get_relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
+        if not relation:
+            return None
+        try:
+            service_account = self._spark_service_account_requirer.fetch_relation_field(
+                relation.id, "service-account"
+            )
+            if not service_account:
+                return None
+            namespace, username = service_account.split(":", 1)
+            return {"spark_namespace": namespace, "spark_username": username}
+        except Exception:
+            return None
 
     @property
     def _peer_application_data(self) -> ops.RelationDataContent:
@@ -617,6 +645,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
+                extra_data=self.get_service_account,
             )
 
         except ExceptionWithStatusError as e:
