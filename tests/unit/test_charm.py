@@ -1818,9 +1818,7 @@ class TestSparkServiceAccount:
             "fetch_relation_field",
             return_value="airflow-spark:spark",
         ):
-            spark_relation = ops.testing.Relation(
-                constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME
-            )
+            spark_relation = ops.testing.Relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
             state_with_spark = dataclasses.replace(
                 state,
                 relations=list(state.relations) + [spark_relation],
@@ -1840,9 +1838,7 @@ class TestSparkServiceAccount:
             "fetch_relation_field",
             return_value=None,
         ):
-            spark_relation = ops.testing.Relation(
-                constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME
-            )
+            spark_relation = ops.testing.Relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
             state_with_spark = dataclasses.replace(
                 state,
                 relations=list(state.relations) + [spark_relation],

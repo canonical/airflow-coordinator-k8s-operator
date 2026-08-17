@@ -174,7 +174,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     @property
     def _spark_service_account_data(self) -> dict | None:
-        """Return Spark service account namespace and username from the Integration Hub relation."""
+        """Return Spark service account namespace, username from the Integration Hub relation."""
         relation = self.model.get_relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
         if not relation:
             return None
