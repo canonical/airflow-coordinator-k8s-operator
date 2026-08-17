@@ -1802,17 +1802,17 @@ class TestPebbleLayer:
 
 
 class TestSparkServiceAccount:
-    def test_get_service_account_returns_none_without_relation(
+    def test_spark_service_account_data_returns_none_without_relation(
         self, context, state, mock_command_executor, workload_container
     ):
         with context(context.on.start(), state) as manager:
             charm = manager.charm
-            assert charm.get_service_account is None
+            assert charm._spark_service_account_data is None
 
-    def test_get_service_account_returns_dict_with_relation_data(
+    def test_spark_service_account_data_returns_dict_with_relation_data(
         self, context, state, mock_command_executor, workload_container
     ):
-        """get_service_account parses 'namespace:username' into a dict."""
+        """_spark_service_account_data parses 'namespace:username' into a dict."""
         with unittest.mock.patch.object(
             spark_service_account.SparkServiceAccountRequirer,
             "fetch_relation_field",
@@ -1827,14 +1827,14 @@ class TestSparkServiceAccount:
             )
             with context(context.on.start(), state_with_spark) as manager:
                 charm = manager.charm
-                result = charm.get_service_account
+                result = charm._spark_service_account_data
 
         assert result == {"spark_namespace": "airflow-spark", "spark_username": "spark"}
 
-    def test_get_service_account_returns_none_when_field_empty(
+    def test_spark_service_account_data_returns_none_when_field_empty(
         self, context, state, mock_command_executor, workload_container
     ):
-        """get_service_account returns None when the relation field is empty."""
+        """_spark_service_account_data returns None when the relation field is empty."""
         with unittest.mock.patch.object(
             spark_service_account.SparkServiceAccountRequirer,
             "fetch_relation_field",
@@ -1849,6 +1849,6 @@ class TestSparkServiceAccount:
             )
             with context(context.on.start(), state_with_spark) as manager:
                 charm = manager.charm
-                result = charm.get_service_account
+                result = charm._spark_service_account_data
 
         assert result is None

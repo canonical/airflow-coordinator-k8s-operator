@@ -172,10 +172,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             )
         return peer_relation
 
-    # TODO: write a property to return dict with namespace and username
     @property
-    def get_service_account(self) -> dict | None:
-        """Get spark service account details."""
+    def _spark_service_account_data(self) -> dict | None:
+        """Return Spark service account namespace and username from the Integration Hub relation."""
         relation = self.model.get_relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
         if not relation:
             return None
@@ -645,7 +644,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
-                extra_data=self.get_service_account,
+                extra_data=self._spark_service_account_data,
             )
 
         except ExceptionWithStatusError as e:

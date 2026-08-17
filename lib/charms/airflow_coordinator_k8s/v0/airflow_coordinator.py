@@ -811,7 +811,6 @@ class AirflowCoordinatorRequires(ops.Object):
         for event in self._relation_events():
             self.framework.observe(event, callback)
 
-    # TODO: return property with extra_data
     def _no_relation_events(self) -> list:
         """Events to observe when no relation exists."""
         return [
