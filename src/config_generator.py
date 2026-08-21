@@ -242,13 +242,19 @@ class AirflowConfigGenerator:
 
     @property
     def _connection_env_vars(self) -> dict[str, str]:
-        """S3 connection URIs keyed for AIRFLOW_CONN_* env var injection in worker pods."""
-        from urllib.parse import quote_plus, urlencode
-
+        """S3 connection URIs for AIRFLOW_CONN_* env var injection."""
         return {
-            f"connections__s3_relation_{rid}_connection": (
-                f"aws://{quote_plus(info.access_key)}:{quote_plus(info.secret_key)}@/"
-                + (f"?{urlencode({k: v for k, v in [('region_name', info.region), ('endpoint_url', info.endpoint)] if v})}" if info.region or info.endpoint else "")
+            f"connections__s3_relation_{rid}_connection": json.dumps(
+                {
+                    "conn_type": "aws",
+                    "login": info.access_key,
+                    "password": info.secret_key,
+                    **(
+                        {"extra": {"region_name": info.region, "endpoint_url": info.endpoint}}
+                        if info.region or info.endpoint
+                        else {}
+                    ),
+                }
             )
             for rid, info in self._charm.s3_relation_connections.items()
         }
