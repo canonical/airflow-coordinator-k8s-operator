@@ -78,9 +78,10 @@ class S3ConnectionInfo:
 
         normalized_data = {key.replace("-", "_"): value for key, value in data.items()}
 
-        if isinstance(normalized_data["tls_ca_chain"], str):
+        tls_ca_chain = normalized_data.get("tls_ca_chain")
+        if isinstance(tls_ca_chain, str):
             try:
-                normalized_data["tls_ca_chain"] = json.loads(normalized_data["tls_ca_chain"])
+                normalized_data["tls_ca_chain"] = json.loads(tls_ca_chain)
             except Exception:
                 pass
 
