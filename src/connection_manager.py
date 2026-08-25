@@ -86,6 +86,17 @@ class S3ConnectionInfo:
 
         return cls(**normalized_data)
 
+    def connection_extras(self, tls_ca_chain_path: typing.Optional[str] = None) -> dict:
+        """Build the Airflow connection extras dict for this S3 connection."""
+        extras = {}
+        if self.region:
+            extras["region_name"] = self.region
+        if self.endpoint:
+            extras["endpoint_url"] = self.endpoint
+        if tls_ca_chain_path:
+            extras["verify"] = tls_ca_chain_path
+        return extras
+
 
 class AirflowConnectionManager:
     """Encapsulate business logic around management of Airflow connections."""

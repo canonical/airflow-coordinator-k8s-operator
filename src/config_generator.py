@@ -249,11 +249,7 @@ class AirflowConfigGenerator:
                     "conn_type": "aws",
                     "login": info.access_key,
                     "password": info.secret_key,
-                    **(
-                        {"extra": {"region_name": info.region, "endpoint_url": info.endpoint}}
-                        if info.region or info.endpoint
-                        else {}
-                    ),
+                    **({"extra": info.connection_extras()} if info.connection_extras() else {}),
                 }
             )
             for rid, info in self._charm.s3_relation_connections.items()

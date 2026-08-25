@@ -551,6 +551,8 @@ class TestDagBundles:
                 assert conn["conn_type"] == "aws"
                 assert conn["login"] == s3_relation.remote_app_data["access-key"]
                 assert conn["password"] == s3_relation.remote_app_data["secret-key"]
+                assert conn["extra"]["region_name"] == s3_relation.remote_app_data["region"]
+                assert conn["extra"]["endpoint_url"] == s3_relation.remote_app_data["endpoint"]
 
     def test_valid_s3_relations_non_leader(self, context, state_without_git):
         """Non-leader coordinator units no-op."""
