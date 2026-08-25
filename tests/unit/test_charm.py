@@ -481,7 +481,9 @@ class TestDagBundles:
     ):
         """Charm goes Active when S3 relation data lacks tls-ca-chain (non-TLS backend)."""
         s3_data_no_tls = {k: v for k, v in S3_INTEGRATOR_DATA.items() if k != "tls-ca-chain"}
-        no_tls_relation = dataclasses.replace(s3_integrator_relation, remote_app_data=s3_data_no_tls)
+        no_tls_relation = dataclasses.replace(
+            s3_integrator_relation, remote_app_data=s3_data_no_tls
+        )
 
         relations = [
             r for r in state_without_git.relations if r.endpoint != constants.S3_ENDPOINT_NAME
