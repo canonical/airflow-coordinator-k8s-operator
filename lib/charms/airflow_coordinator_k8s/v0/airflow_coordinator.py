@@ -171,7 +171,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 8
+LIBPATCH = 9
 
 
 logger = logging.getLogger(__name__)
@@ -672,7 +672,7 @@ class AirflowCoordinatorProviderEventHandler(
         webserver_config_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
-        extra_data: dict[str, str] = {},
+        extra_data: typing.Optional[dict[str, str]] = None,
     ):
         """Update data to send to related core charms."""
         if not self.interface.relations:
@@ -703,7 +703,8 @@ class AirflowCoordinatorProviderEventHandler(
                         model.sensitive_data = json.dumps(sensitive_data)
 
                     model.tls_ca_chains = tls_ca_chains
-                    model.extra_data = extra_data
+                    if extra_data:
+                        model.extra_data = extra_data
 
                     model.validation_failures = None
                 except pydantic.ValidationError:
@@ -716,7 +717,7 @@ class AirflowCoordinatorProviderEventHandler(
                     webserver_config_template=webserver_config_template,
                     sensitive_data=json.dumps(sensitive_data),
                     tls_ca_chains=tls_ca_chains,
-                    extra_data=extra_data,
+                    extra_data=extra_data or None,
                 )
 
             self.interface.write_model(relation.id, model)
@@ -1250,7 +1251,7 @@ class AirflowCoordinatorProvides(ops.Object):
         webserver_config_template: typing.Optional[str] = None,
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
-        extra_data: dict[str, str] = {},
+        extra_data: typing.Optional[dict[str, str]] = None,
     ) -> None:
         """Update config with related core charms.
 

@@ -178,16 +178,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         relation = self.model.get_relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
         if not relation:
             return None
-        try:
-            service_account = self._spark_service_account_requirer.fetch_relation_field(
-                relation.id, "service-account"
-            )
-            if not service_account:
-                return None
-            namespace, username = service_account.split(":", 1)
-            return {"spark_namespace": namespace, "spark_username": username}
-        except Exception:
+        service_account = self._spark_service_account_requirer.fetch_relation_field(
+            relation.id, "service-account"
+        )
+        if not service_account:
             return None
+        namespace, username = service_account.split(":", 1)
+        return {"spark_namespace": namespace, "spark_username": username}
 
     @property
     def _peer_application_data(self) -> ops.RelationDataContent:
@@ -644,7 +641,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
-                extra_data=self._spark_service_account_data,
+                **(
+                    {"extra_data": self._spark_service_account_data}
+                    if self._spark_service_account_data
+                    else {}
+                ),
             )
 
         except ExceptionWithStatusError as e:
