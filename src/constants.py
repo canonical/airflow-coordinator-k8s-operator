@@ -22,6 +22,10 @@ TLS_CA_CHAIN_FILEPATH_TEMPLATE = AIRFLOW_HOME + "/connection_certs/{filename}.pe
 WORKLOAD_USER = "ubuntu"
 WORKLOAD_GROUP = "ubuntu"
 
+SPARK_NAMESPACE = "airflow-spark"
+SPARK_USERNAME = "spark"
+SPARK_SERVICE_ACCOUNT_RELATION_NAME = "spark-service-account"
+
 MISSING_POSTGRES_INTEGRATION_MESSAGE = "Missing integration with postgres"
 WAITING_FOR_DATABASE_TO_BE_CREATED_MESSAGE = "Waiting for airflow database to be created"
 WAITING_FOR_DATABASE_CONNECTION_MESSAGE = "Waiting for database connection info from postgres"

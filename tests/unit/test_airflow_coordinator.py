@@ -1419,3 +1419,37 @@ class TestAirflowCoordinatorProvides:
                     relation.local_app_data["webserver-config-template"]
                     == airflow_config_params["webserver_config_template"]
                 )
+
+    def test_set_airflow_config_with_extra_data(self, coordinator_context):
+        state = generate_coordinator_state()
+        extra_data = {"spark_namespace": "test-ns", "spark_username": "spark"}
+
+        with coordinator_context(
+            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            state,
+        ) as manager:
+            manager.charm.provider.set_airflow_config(
+                config_template="template",
+                sensitive_data={"secret": "val"},
+                extra_data=extra_data,
+            )
+            state_out = manager.run()
+
+        for relation in state_out.relations:
+            assert relation.local_app_data.get("extra-data") == json.dumps(extra_data)
+
+    def test_set_airflow_config_omits_extra_data_when_none(self, coordinator_context):
+        state = generate_coordinator_state()
+
+        with coordinator_context(
+            coordinator_context.on.relation_changed(state.get_relations("airflow-coordinator")[0]),
+            state,
+        ) as manager:
+            manager.charm.provider.set_airflow_config(
+                config_template="template",
+                sensitive_data={"secret": "val"},
+            )
+            state_out = manager.run()
+
+        for relation in state_out.relations:
+            assert "extra-data" not in relation.local_app_data
