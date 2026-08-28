@@ -62,11 +62,12 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 2
+LIBPATCH = 3
 
 HOST_KEY = "host"
 PORT_KEY = "port"
 INGRESS_PATH_KEY = "ingress_path"
+INGRESS_URL_KEY = "ingress_url"
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,24 @@ class AirflowAPIServerProvides(ops.Object):
             return
         self._relation.data[self._charm.app].pop(INGRESS_PATH_KEY, None)
 
+    def set_ingress_url(self, url: str) -> None:
+        """Write the full external ingress URL to the relation.
+
+        Unlike :meth:`set_ingress_path`, this carries the scheme and authority
+        assigned by the ingress provider, so the requirer can use it verbatim as
+        Airflow's ``base_url`` instead of rebuilding one from the internal host
+        and port.  Stored with any trailing slash stripped.
+        """
+        if not self._relation or not self._charm.unit.is_leader():
+            return
+        self._relation.data[self._charm.app][INGRESS_URL_KEY] = url.rstrip("/")
+
+    def clear_ingress_url(self) -> None:
+        """Remove the external ingress URL from the relation."""
+        if not self._relation or not self._charm.unit.is_leader():
+            return
+        self._relation.data[self._charm.app].pop(INGRESS_URL_KEY, None)
+
 
 class AirflowAPIServerRequires(ops.Object):
     """A requirer handler encapsulating the airflow api server relation."""
@@ -171,3 +190,18 @@ class AirflowAPIServerRequires(ops.Object):
             return None
 
         return self._relation.data[self._relation.app].get(INGRESS_PATH_KEY)
+
+    @property
+    def api_server_ingress_url(self) -> typing.Optional[str]:
+        """Return the full external API server URL published by the ingress provider.
+
+        Includes the scheme, authority and path prefix (e.g.
+        ``https://10.0.0.1/model-app``) and is safe to use directly as Airflow's
+        ``base_url``.  Returns ``None`` when the API server is not behind an
+        ingress, in which case callers should fall back to
+        :attr:`api_server_host` and :attr:`api_server_port`.
+        """
+        if not self._relation or not self._relation.app:
+            return None
+
+        return self._relation.data[self._relation.app].get(INGRESS_URL_KEY)

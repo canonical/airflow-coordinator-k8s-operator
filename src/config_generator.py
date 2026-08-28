@@ -27,7 +27,22 @@ class AirflowConfigGenerator:
 
     @property
     def _api_server_base_url(self) -> str:
-        """Return the API server base URL, appending the ingress path when available."""
+        """Return the API server base URL, preferring the external ingress URL.
+
+        When the API server is behind an ingress, the URL published by the
+        provider is used verbatim: it carries the externally reachable scheme
+        and authority, which cannot be recovered from the API server's internal
+        host and port.  This URL is what browsers and the identity provider have
+        to reach, so it backs both Airflow's `base_url` and the OAuth redirect URI.
+
+        Falls back to the internal host and port when there is no ingress, and to
+        the host, port and path when the provider is running an older revision of
+        the library that publishes only the path.
+        """
+        ingress_url = self._charm._api_server_requires.api_server_ingress_url
+        if ingress_url:
+            return ingress_url.rstrip("/")
+
         host = self._charm._api_server_requires.api_server_host
         port = self._charm._api_server_requires.api_server_port
         ingress_path = self._charm._api_server_requires.api_server_ingress_path

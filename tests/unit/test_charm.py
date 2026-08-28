@@ -1782,6 +1782,38 @@ def test_base_url_uses_ingress_path_when_available(
         assert "http://test-host:test-port/test-airflow-api-server-k8s" in config_template
 
 
+def test_base_url_prefers_ingress_url_over_internal_host(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    """Verify base_url uses the external ingress URL rather than the internal host."""
+    ingress_relation = dataclasses.replace(
+        airflow_api_server_requires_relation,
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+            "ingress_path": "test-airflow-api-server-k8s",
+            "ingress_url": "https://10.0.0.1/test-airflow-api-server-k8s/",
+        },
+    )
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    all_required_relations.append(ingress_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        config_template = relation.local_app_data.get("config-template", "")
+        # Trailing slash stripped, and the unreachable internal host is not used.
+        assert "https://10.0.0.1/test-airflow-api-server-k8s" in config_template
+        assert "http://test-host:test-port" not in config_template
+
+
 def test_base_url_falls_back_to_internal_url_without_ingress(
     context,
     state,
