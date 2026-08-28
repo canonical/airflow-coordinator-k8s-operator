@@ -128,7 +128,7 @@ class AirflowConfigGenerator:
             "kwargs": {
                 "aws_conn_id": f"s3_relation_{relation_id}_connection",
                 "bucket_name": s3_connection_info.bucket,
-                "prefix": s3_connection_info.path,
+                "prefix": s3_connection_info.path or "",
             },
         }
 
@@ -237,4 +237,20 @@ class AirflowConfigGenerator:
             "api__secret_key": keys_content["secret-key"],
             "api_auth__jwt_secret": keys_content["jwt-secret"],
             "core__fernet_key": self._charm._fernet_key,
+            **self._connection_env_vars,
+        }
+
+    @property
+    def _connection_env_vars(self) -> dict[str, str]:
+        """S3 connection URIs for AIRFLOW_CONN_* env var injection."""
+        return {
+            f"connections__s3_relation_{rid}_connection": json.dumps(
+                {
+                    "conn_type": "aws",
+                    "login": info.access_key,
+                    "password": info.secret_key,
+                    **({"extra": info.connection_extras()} if info.connection_extras() else {}),
+                }
+            )
+            for rid, info in self._charm.s3_relation_connections.items()
         }

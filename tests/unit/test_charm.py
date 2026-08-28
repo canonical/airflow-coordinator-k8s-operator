@@ -561,6 +561,21 @@ class TestDagBundles:
                 )
             ]
 
+            # S3 connection URIs present in sensitive_data for worker pod env var injection
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            for s3_relation in [s3_integrator_relation, s3_integrator_relation2]:
+                conn_key = f"connections__s3_relation_{s3_relation.id}_connection"
+                assert conn_key in sensitive_data
+                conn = json.loads(sensitive_data[conn_key])
+                assert conn["conn_type"] == "aws"
+                assert conn["login"] == s3_relation.remote_app_data["access-key"]
+                assert conn["password"] == s3_relation.remote_app_data["secret-key"]
+                assert conn["extra"]["region_name"] == s3_relation.remote_app_data["region"]
+                assert conn["extra"]["endpoint_url"] == s3_relation.remote_app_data["endpoint"]
+
     def test_valid_s3_relations_non_leader(self, context, state_without_git):
         """Non-leader coordinator units no-op."""
         state_without_git = dataclasses.replace(state_without_git, leader=False)
