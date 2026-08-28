@@ -150,6 +150,37 @@ class TestOAuth:
             "http://test-host:test-port/"
         ), client_config.redirect_uri
 
+    def test_oauth_requested_scope_matches_registered_scope(
+        self,
+        context,
+        state_with_oauth,
+        mock_get_provider_info,
+    ):
+        """FAB requests exactly the scope the client was registered with.
+
+        The provider advertises the scopes it supports, which is a superset of what
+        any one client is granted. Requesting that superset makes the provider deny
+        the authorization request, so the rendered webserver config must use the
+        registered scope instead.
+        """
+        with unittest.mock.patch.object(
+            oauth.OAuthRequirer,
+            "update_client_config",
+        ) as mock_update:
+            with unittest.mock.patch.object(
+                airflow_coordinator.AirflowCoordinatorProvides,
+                "set_airflow_config",
+            ) as mock_set:
+                context.run(context.on.start(), state_with_oauth)
+
+        registered_scope = mock_update.call_args.args[0].scope
+        assert registered_scope == constants.OAUTH_SCOPE
+
+        webserver_template = mock_set.call_args.kwargs.get("webserver_config_template")
+        assert f'"scope": "{registered_scope}"' in webserver_template
+        # The provider supports `phone`; this client is not registered for it.
+        assert "phone" not in webserver_template
+
     def test_oauth_includes_client_secret_in_sensitive_data(
         self,
         context,

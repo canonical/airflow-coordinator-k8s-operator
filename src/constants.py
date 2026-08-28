@@ -12,6 +12,11 @@ OAUTH_ENDPOINT_NAME = "oauth"
 # OAuth callback as `/auth/oauth-authorized/<provider>`. The redirect URI registered
 # with the provider has to match that exactly or the authorization request is rejected.
 OAUTH_REDIRECT_PATH = "auth/oauth-authorized/hydra"
+# Scopes this client registers with the provider and asks for at authorization time.
+# Both sides must use this value: the provider denies an authorization request for any
+# scope the client is not registered for, so requesting the provider's full list of
+# *supported* scopes instead of this client's *granted* ones fails the sign-in.
+OAUTH_SCOPE = "openid email profile offline"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"
