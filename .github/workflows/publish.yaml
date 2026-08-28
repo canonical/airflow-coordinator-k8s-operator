@@ -18,6 +18,8 @@ jobs:
     needs:
       - tests
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -37,6 +39,8 @@ jobs:
     needs:
       - tests
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5

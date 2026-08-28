@@ -12,6 +12,7 @@ import unittest.mock
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.git_integrator.v0.git as git
+import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
 import ops
 import ops.testing
 import pytest
@@ -1834,3 +1835,52 @@ class TestPebbleLayer:
         assert "airflow-running" in layer["checks"]
         assert layer["checks"]["airflow-running"]["override"] == "replace"
         assert layer["checks"]["airflow-running"]["exec"]["command"] == "/bin/true"
+
+
+class TestSparkServiceAccount:
+    def test_spark_service_account_data_returns_none_without_relation(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        with context(context.on.start(), state) as manager:
+            charm = manager.charm
+            assert charm._spark_service_account_data is None
+
+    def test_spark_service_account_data_returns_dict_with_relation_data(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """_spark_service_account_data parses 'namespace:username' into a dict."""
+        with unittest.mock.patch.object(
+            spark_service_account.SparkServiceAccountRequirer,
+            "fetch_relation_field",
+            return_value="airflow-spark:spark",
+        ):
+            spark_relation = ops.testing.Relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
+            state_with_spark = dataclasses.replace(
+                state,
+                relations=list(state.relations) + [spark_relation],
+            )
+            with context(context.on.start(), state_with_spark) as manager:
+                charm = manager.charm
+                result = charm._spark_service_account_data
+
+        assert result == {"spark_namespace": "airflow-spark", "spark_username": "spark"}
+
+    def test_spark_service_account_data_returns_none_when_field_empty(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """_spark_service_account_data returns None when the relation field is empty."""
+        with unittest.mock.patch.object(
+            spark_service_account.SparkServiceAccountRequirer,
+            "fetch_relation_field",
+            return_value=None,
+        ):
+            spark_relation = ops.testing.Relation(constants.SPARK_SERVICE_ACCOUNT_RELATION_NAME)
+            state_with_spark = dataclasses.replace(
+                state,
+                relations=list(state.relations) + [spark_relation],
+            )
+            with context(context.on.start(), state_with_spark) as manager:
+                charm = manager.charm
+                result = charm._spark_service_account_data
+
+        assert result is None
