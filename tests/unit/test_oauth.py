@@ -125,6 +125,31 @@ class TestOAuth:
         assert "{{ webserver_config__client_secret }}" in webserver_template
         assert OAUTH_CLIENT_SECRET not in webserver_template
 
+    def test_oauth_redirect_uri_matches_fab_callback_route(
+        self,
+        context,
+        state_with_oauth,
+        mock_get_provider_info,
+    ):
+        """The registered redirect URI points at FAB's callback under `/auth`.
+
+        Airflow 3 mounts the FAB auth manager at `/auth`, so a redirect URI without
+        that prefix is rejected by the provider as unregistered.
+        """
+        with unittest.mock.patch.object(
+            oauth.OAuthRequirer,
+            "update_client_config",
+        ) as mock_update:
+            context.run(context.on.start(), state_with_oauth)
+
+        assert mock_update.called
+
+        client_config = mock_update.call_args.args[0]
+        assert client_config.redirect_uri.endswith("/auth/oauth-authorized/hydra")
+        assert client_config.redirect_uri.startswith(
+            "http://test-host:test-port/"
+        ), client_config.redirect_uri
+
     def test_oauth_includes_client_secret_in_sensitive_data(
         self,
         context,

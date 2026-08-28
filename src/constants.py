@@ -8,6 +8,10 @@ AIRFLOW_API_SERVER_ENDPOINT_NAME = "airflow-api-server"
 S3_ENDPOINT_NAME = "s3"
 GIT_ENDPOINT_NAME = "git"
 OAUTH_ENDPOINT_NAME = "oauth"
+# Airflow 3 mounts the FAB auth manager's views under `/auth`, so FAB builds its
+# OAuth callback as `/auth/oauth-authorized/<provider>`. The redirect URI registered
+# with the provider has to match that exactly or the authorization request is rejected.
+OAUTH_REDIRECT_PATH = "auth/oauth-authorized/hydra"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 
 PEER_RELATION_NAME = "coordinator-peers"

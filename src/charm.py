@@ -595,7 +595,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             try:
                 self._oauth_requirer.update_client_config(
                     oauth.ClientConfig(
-                        redirect_uri=f"{self._config_generator._api_server_base_url}/oauth-authorized/hydra",
+                        redirect_uri=f"{self._config_generator._api_server_base_url}/{constants.OAUTH_REDIRECT_PATH}",
                         scope="openid email profile offline",
                         grant_types=["authorization_code", "refresh_token"],
                     )
