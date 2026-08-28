@@ -99,10 +99,10 @@ file contents to the workload container
 
 `AirflowCoordinatorCoreRequires` will invoke the provided `callback` when:
 - the coordinator charm shares validation failures for all related core charms
-- the coordinator charm first shares the airflow config and/or k8s executor
-pod spec files
-- the coordinator charm updates anything that affects the airflow config and/or
-k8s executor pod spec files
+- the coordinator charm first shares the airflow config, k8s executor pod spec
+and/or webserver config files
+- the coordinator charm updates anything that affects the airflow config, k8s
+executor pod spec and/or webserver config files
 - the relation with the coordinator charm is broken
 
 ### Provider Charm
@@ -171,7 +171,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 9
+LIBPATCH = 10
 
 
 logger = logging.getLogger(__name__)
@@ -462,6 +462,12 @@ class AirflowCoordinatorRequirerEventHandler(
             "config-template" in _diff.changed
             or "kubernetes-executor-pod-spec" in _diff.changed
             or "sensitive-data" in _diff.changed
+            # The webserver config is written from its own databag key, so a change
+            # confined to it (an OAuth scope, a role mapping, user registration) must
+            # emit too. Without this the core charm never reconciles and the stale
+            # webserver_config.py stays on disk.
+            or "webserver-config-template" in _diff.changed
+            or "webserver-config-template" in _diff.added
         ):
             getattr(self.on, "airflow_config_updated").emit(
                 event.relation, app=event.app, unit=event.unit, content=content
