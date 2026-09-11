@@ -237,12 +237,16 @@ class AirflowConfigGenerator:
             "api__secret_key": keys_content["secret-key"],
             "api_auth__jwt_secret": keys_content["jwt-secret"],
             "core__fernet_key": self._charm._fernet_key,
-            **self._connection_env_vars,
+            **self._connection_configurations,
         }
 
     @property
-    def _connection_env_vars(self) -> dict[str, str]:
-        """S3 connection URIs for AIRFLOW_CONN_* env var injection."""
+    def _connection_configurations(self) -> dict[str, str]:
+        """S3 connection details serialized as Airflow connection URIs.
+
+        Each value embeds the S3 secret key, so the whole mapping is sensitive and
+        is merged into ``sensitive_config_values``.
+        """
         return {
             f"connections__s3_relation_{rid}_connection": json.dumps(
                 {
