@@ -133,17 +133,7 @@ class CommandExecutor:
 
         The 'airflow connections add' creates or updates an existing connection.
         """
-        extras = {}
-
-        if connection_info.region:
-            extras["region_name"] = connection_info.region
-
-        if connection_info.endpoint:
-            extras["endpoint_url"] = connection_info.endpoint
-
-        if tls_ca_chain_path:
-            extras["verify"] = tls_ca_chain_path
-
+        extras = connection_info.connection_extras(tls_ca_chain_path)
         extras_options = ["--conn-extra", json.dumps(extras)] if extras else []
 
         # airflow connections add also updates existing connections
