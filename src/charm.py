@@ -4,11 +4,13 @@
 
 """The Airflow Coordinator charm application."""
 
+import configparser
 import json
 import logging
 import secrets
 import zoneinfo
 
+import airflow_provider_configurator as provider_config
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
@@ -85,6 +87,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             callback=self._reconcile,
         )
 
+        self._provider_config_requires = provider_config.AirflowProviderConfiguratorRequires(
+            self,
+            constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME,
+        )
+
         self._oauth_requirer = oauth.OAuthRequirer(
             self, relation_name=constants.OAUTH_ENDPOINT_NAME
         )
@@ -99,11 +106,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on.start,
             self.on.config_changed,
             self.on.update_status,
+            self.on.secret_changed,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
+            self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_changed,
+            self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_broken,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
@@ -360,6 +370,94 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return content.kubernetes_executor_pod_spec
 
     @property
+    def _provider_config_relation(self) -> ops.Relation | None:
+        """Return the active provider-configuration relation, if any.
+
+        Guards on ``relation.active`` (not just presence) so that during the
+        ``relation-broken`` hook -- when ``get_relation`` still returns the
+        departing relation -- provider configuration is treated as absent and
+        removed from the distributed airflow.cfg entirely (spec: config must be
+        gone on relation_broken).
+        """
+        relation = self.model.get_relation(constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME)
+        if relation and relation.active:
+            return relation
+        return None
+
+    @property
+    def _provider_sensitive_data(self) -> dict:
+        """Return the sensitive provider values keyed for the config template.
+
+        Mirrors the soft-failure behaviour of ``_kubernetes_executor_config``: if
+        the backing Juju secret is not yet readable (e.g. not granted to this
+        charm yet), log and proceed with an empty mapping rather than blocking the
+        whole reconcile (the agreed k8s-executor approach).
+
+        Returns an empty dict when there is no active relation.
+        """
+        if not self._provider_config_relation:
+            return {}
+        try:
+            return self._provider_config_requires.get_sensitive_data()
+        except provider_config.SecretNotReadyError:
+            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            return {}
+
+    @property
+    def _provider_config(self) -> dict:
+        """Return provider configuration sections from the provider configurator relation.
+
+        The provider configurator shares its non-sensitive configuration as a
+        Jinja2 template string, where sensitive values appear as
+        ``{{ provider__section__option }}`` placeholders. This parses that
+        template back into the ``{section: {option: value}}`` shape expected by
+        ``config_template_with_extra_config`` (using ``RawConfigParser`` so the
+        ``{{ ... }}`` and any ``%`` characters survive unmangled, and
+        ``optionxform`` preserved so option keys keep their case -- matching the
+        charmlib's ``configuration_keys()`` for future Layer 1 collision checks;
+        note the downstream generator currently lowercases on output).
+
+        Returns an empty dict when the relation is not established/active or the
+        provider has not shared configuration yet. Reserved, security-critical
+        keys supplied by the provider are dropped (interim guard until Layer 1
+        validation lands).
+
+        Raises:
+            ExceptionWithStatusError: BlockedStatus if the provider's template is
+                not valid INI (malformed data from another application).
+        """
+        if not self._provider_config_relation:
+            return {}
+        template = self._provider_config_requires.configurations()
+        if not template:
+            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
+            return {}
+        parser = configparser.RawConfigParser()
+        parser.optionxform = str  # type: ignore[assignment, method-assign]
+        try:
+            parser.read_string(template)
+        except configparser.Error as e:
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_CONFIG_MESSAGE, ops.BlockedStatus
+            ) from e
+
+        result: dict[str, dict[str, str]] = {}
+        for section in parser.sections():
+            options: dict[str, str] = {}
+            for option in parser.options(section):
+                if f"{section}.{option}" in constants.PROVIDER_CONFIG_RESERVED_KEYS:
+                    logger.warning(
+                        "Ignoring reserved provider configuration key %s.%s",
+                        section,
+                        option,
+                    )
+                    continue
+                options[option] = parser.get(section, option, raw=True)
+            if options:
+                result[section] = options
+        return result
+
+    @property
     def _oauth_active(self) -> bool:
         """Return True when the oauth relation has valid provider credentials."""
         if not self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
@@ -372,9 +470,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     @property
     def _airflow_config_template(self) -> str:
         """Airflow config template merged with additional runtime compiled configs."""
+        # Provider config is merged FIRST so every coordinator-managed extra
+        # (api server uri, dag bundles, k8s executor, core, auth) wins over it
+        # under mergedeep's last-wins semantics. This is the primary safeguard
+        # against a provider overriding coordinator-owned config while Layer 1
+        # validation is deferred; the reserved-key denylist in _provider_config
+        # additionally protects security-critical base-template keys.
         return self._config_generator.config_template_with_extra_config(
             **mergedeep.merge(
                 {},
+                self._provider_config,
                 self._config_generator.api_server_uri_config,
                 self._config_generator.dag_bundle_config,
                 (self._kubernetes_executor_config or {}),
@@ -575,6 +680,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._airflow_config_template,
             {
                 **self._config_generator.sensitive_config_values,
+                **self._provider_sensitive_data,
                 "render_sensitive_data": True,
             },
             user=constants.WORKLOAD_USER,
@@ -629,6 +735,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             sensitive_data = {
                 **self._config_generator.sensitive_config_values,
                 **self._webserver_config_generator.sensitive_values,
+                **self._provider_sensitive_data,
                 "render_sensitive_data": True,
             }
 

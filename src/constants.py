@@ -9,6 +9,7 @@ S3_ENDPOINT_NAME = "s3"
 GIT_ENDPOINT_NAME = "git"
 OAUTH_ENDPOINT_NAME = "oauth"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
+AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME = "airflow-provider-configuration"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -43,6 +44,25 @@ AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow key
 AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
+)
+WAITING_FOR_PROVIDER_CONFIG_MESSAGE = (
+    "Waiting for configuration from the provider configurator charm"
+)
+WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
+    "Waiting for the provider configuration secret to be granted"
+)
+INVALID_PROVIDER_CONFIG_MESSAGE = "Provider configuration is not valid INI"
+# Security-critical config keys the provider configurator is not allowed to set,
+# expressed as "section.option" (matching the charmlib's configuration_keys()).
+# Interim guard until Layer 1 collision validation lands: these live in the base
+# airflow.cfg template as rendered secrets, and extras always layer over the base
+# template regardless of merge order, so they must be filtered explicitly.
+PROVIDER_CONFIG_RESERVED_KEYS = frozenset(
+    {
+        "core.fernet_key",
+        "api.secret_key",
+        "api_auth.jwt_secret",
+    }
 )
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
 INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
