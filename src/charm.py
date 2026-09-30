@@ -414,13 +414,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         ``config_template_with_extra_config`` (using ``RawConfigParser`` so the
         ``{{ ... }}`` and any ``%`` characters survive unmangled, and
         ``optionxform`` preserved so option keys keep their case -- matching the
-        charmlib's ``configuration_keys()`` for future Layer 1 collision checks;
+        charmlib's ``configuration_keys()`` for the Layer 1 collision checks;
         note the downstream generator currently lowercases on output).
 
         Returns an empty dict when the relation is not established/active or the
-        provider has not shared configuration yet. Reserved, security-critical
-        keys supplied by the provider are dropped (interim guard until Layer 1
-        validation lands).
+        provider has not shared configuration yet.
+
+        Provider-supplied keys that collide with coordinator-owned configuration
+        are not filtered here: that is Layer 1 validation, which computes the
+        owned-key set from the rendered config and lands in a follow-up change.
 
         Raises:
             ExceptionWithStatusError: BlockedStatus if the provider's template is
@@ -441,21 +443,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.INVALID_PROVIDER_CONFIG_MESSAGE, ops.BlockedStatus
             ) from e
 
-        result: dict[str, dict[str, str]] = {}
-        for section in parser.sections():
-            options: dict[str, str] = {}
-            for option in parser.options(section):
-                if f"{section}.{option}" in constants.PROVIDER_CONFIG_RESERVED_KEYS:
-                    logger.warning(
-                        "Ignoring reserved provider configuration key %s.%s",
-                        section,
-                        option,
-                    )
-                    continue
-                options[option] = parser.get(section, option, raw=True)
-            if options:
-                result[section] = options
-        return result
+        return {
+            section: {
+                option: parser.get(section, option, raw=True)
+                for option in parser.options(section)
+            }
+            for section in parser.sections()
+        }
 
     @property
     def _oauth_active(self) -> bool:
@@ -472,10 +466,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """Airflow config template merged with additional runtime compiled configs."""
         # Provider config is merged FIRST so every coordinator-managed extra
         # (api server uri, dag bundles, k8s executor, core, auth) wins over it
-        # under mergedeep's last-wins semantics. This is the primary safeguard
-        # against a provider overriding coordinator-owned config while Layer 1
-        # validation is deferred; the reserved-key denylist in _provider_config
-        # additionally protects security-critical base-template keys.
+        # under mergedeep's last-wins semantics. Note this does not protect keys
+        # that only exist in the base template, since extras always layer over
+        # it; that is handled by Layer 1 validation in a follow-up change.
         return self._config_generator.config_template_with_extra_config(
             **mergedeep.merge(
                 {},

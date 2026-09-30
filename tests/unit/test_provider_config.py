@@ -7,11 +7,13 @@
 # into the distributed sensitive-data secret).
 #
 # Behaviour under test also covers the hardening applied after review:
-#   * provider config merged first + reserved-key denylist (cannot override
-#     coordinator-owned / security-critical config);
+#   * provider config merged first, so coordinator-owned config wins;
 #   * malformed provider INI -> BlockedStatus;
 #   * relation_broken -> provider config removed entirely;
 #   * secret-not-ready -> soft proceed (Active), mirroring the k8s-executor path.
+#
+# Collision handling between provider keys and coordinator-owned keys is Layer 1
+# validation and is covered by a follow-up change.
 
 import configparser
 import dataclasses
@@ -202,29 +204,6 @@ def test_provider_config_secret_not_ready_soft_proceeds(context, state, workload
         # No provider sensitive values were distributed (secret was unreadable).
         sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
         assert "provider__gcs__conn_id" not in sensitive_data
-
-
-def test_provider_config_reserved_key_is_dropped(context, state, workload_container):
-    """A provider cannot override a reserved, security-critical base-template key."""
-    secret = _sensitive_secret()
-    # Provider tries to hijack the fernet key alongside a benign option.
-    template = "[core]\nfernet_key = pwned\n[gcs]\nproject = my-project\n"
-    relation = _provider_relation(template, secret.id)
-
-    state_in = dataclasses.replace(
-        state,
-        relations=[*state.relations, relation],
-        secrets=[*state.secrets, secret],
-    )
-
-    state_out = context.run(context.on.start(), state_in)
-
-    assert state_out.unit_status == ops.ActiveStatus()
-    for config_template in _distributed_config_templates(state_out):
-        # Reserved key override dropped: the malicious value never reaches the cfg.
-        assert "pwned" not in config_template
-        # Benign provider option still merged.
-        assert _parse(config_template).get("gcs", "project") == "my-project"
 
 
 def test_provider_config_invalid_ini_blocks(context, state, workload_container):
