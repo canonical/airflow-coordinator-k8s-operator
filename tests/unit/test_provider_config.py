@@ -10,7 +10,9 @@
 #   * provider config merged first, so coordinator-owned config wins;
 #   * malformed provider INI -> BlockedStatus;
 #   * relation_broken -> provider config removed entirely;
-#   * secret-not-ready -> soft proceed (Active), mirroring the k8s-executor path.
+#   * secret unreadable -> provider config omitted entirely, reported on status;
+#   * sensitive values confined to the `provider__` namespace;
+#   * Jinja2 syntax in provider content escaped unless it is a backed placeholder.
 #
 # Collision handling between provider keys and coordinator-owned keys is Layer 1
 # validation and is covered by a follow-up change.
@@ -19,6 +21,7 @@ import configparser
 import dataclasses
 import json
 
+import jinja2
 import ops
 import ops.testing
 
@@ -171,17 +174,17 @@ def test_provider_config_removed_on_relation_broken(context, state, workload_con
     assert not _provider_section_present(state_out)
 
 
-def test_provider_config_secret_not_ready_soft_proceeds(context, state, workload_container):
-    """Secret shared but not granted: log + proceed (Active), per the k8s-executor approach.
+def test_provider_config_secret_unreadable_omits_config(context, state, workload_container):
+    """Secret shared but not granted: drop the provider config, report it, stay Active.
 
-    A placeholder-free template is used so the assertion isolates the soft-catch
-    path (SecretNotReadyError -> {}) and does not depend on how an unrendered
-    ``{{ ... }}`` placeholder is treated in the coordinator's own db-migrate cfg.
+    The template carries a placeholder, which is the case that matters: rendering
+    it without the secret would write an empty credential into every core charm's
+    airflow.cfg while the unit still reported Active.
     """
     # A well-formed secret id deliberately NOT added to state, so model.get_secret
     # raises SecretNotFoundError -> the interface raises SecretNotReadyError.
     ungranted_secret = _sensitive_secret()
-    relation = _provider_relation("[gcs]\nproject = my-project\n", ungranted_secret.id)
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, ungranted_secret.id)
 
     state_in = dataclasses.replace(
         state,
@@ -191,19 +194,150 @@ def test_provider_config_secret_not_ready_soft_proceeds(context, state, workload
 
     state_out = context.run(context.on.start(), state_in)
 
-    # Soft proceed: not blocked despite the unreadable secret.
+    # Not blocked, but the dropped configuration is visible on the status.
+    assert state_out.unit_status == ops.ActiveStatus(
+        constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE
+    )
+
+    # Nothing from the provider was distributed -- config and sensitive values
+    # are dropped together, so no placeholder can render blank.
+    assert not _provider_section_present(state_out)
+    for coordinator_relation in state_out.get_relations(
+        constants.AIRFLOW_COORDINATOR_RELATION_NAME
+    ):
+        sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
+        assert "provider__gcs__conn_id" not in sensitive_data
+
+
+def test_provider_sensitive_values_cannot_override_coordinator(
+    context, state, workload_container
+):
+    """Sensitive keys outside the `provider__` namespace are dropped.
+
+    Without this filter a provider could ship ``core__fernet_key`` and replace the
+    coordinator's real fernet key, which Layer 1 cannot catch: it validates
+    configuration keys, and this travels in the separate sensitive-data map.
+    """
+    secret = _sensitive_secret(
+        {
+            "provider__gcs__conn_id": "my-secret-conn-id",
+            "core__fernet_key": "EVIL",
+            "database__sql_alchemy_conn": "postgresql://evil/",
+        }
+    )
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus(
+        constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE
+    )
+
+    coordinator_relations = state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME)
+    assert coordinator_relations
+    for coordinator_relation in coordinator_relations:
+        sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
+
+        # The namespaced value is kept.
+        assert sensitive_data["provider__gcs__conn_id"] == "my-secret-conn-id"
+
+        # The coordinator's own secrets are untouched.
+        assert sensitive_data["core__fernet_key"] != "EVIL"
+        assert not sensitive_data["database__sql_alchemy_conn"].startswith("postgresql://evil/")
+
+
+def test_provider_config_jinja_is_escaped(context, state, workload_container):
+    """Jinja2 in provider content is neutralised unless it is a backed placeholder.
+
+    The provider configurator syncs from a git repository, so its content is
+    untrusted: the coordinator renders it, and so does every core charm. Three
+    cases matter here -- a template-injection payload, a legitimate Airflow
+    setting that happens to contain Jinja2, and a placeholder with no backing
+    value (which would otherwise render blank).
+    """
+    secret = _sensitive_secret()
+    template = (
+        "[gcs]\n"
+        "conn_id = {{ provider__gcs__conn_id }}\n"
+        'injected = {{ "".__class__.__mro__[1].__subclasses__()|length }}\n'
+        "stolen = {{ core__fernet_key }}\n"
+        "unbacked = {{ provider__gcs__missing }}\n"
+        "[logging]\n"
+        "log_filename_template = dag_id={{ ti.dag_id }}/run.log\n"
+    )
+    relation = _provider_relation(template, secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus(
+        constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE
+    )
+
+    coordinator_relations = state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME)
+    assert coordinator_relations
+    for coordinator_relation in coordinator_relations:
+        config_template = coordinator_relation.local_app_data.get("config-template", "")
+        sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
+
+        # Render the way a core charm does, to assert on the final airflow.cfg.
+        rendered = _parse(jinja2.Template(config_template).render(**sensitive_data))
+
+        # The backed placeholder still resolves.
+        assert rendered.get("gcs", "conn_id") == "my-secret-conn-id"
+
+        # The injection payload was not evaluated; it survives as literal text.
+        assert (
+            rendered.get("gcs", "injected")
+            == '{{ "".__class__.__mro__[1].__subclasses__()|length }}'
+        )
+
+        # A coordinator placeholder supplied by the provider does not resolve.
+        assert rendered.get("gcs", "stolen") == "{{ core__fernet_key }}"
+        assert sensitive_data["core__fernet_key"] not in config_template
+
+        # An unbacked provider placeholder stays visible rather than rendering blank.
+        assert rendered.get("gcs", "unbacked") == "{{ provider__gcs__missing }}"
+
+        # A legitimate Airflow setting containing Jinja2 reaches airflow.cfg intact,
+        # for Airflow itself to template at runtime.
+        assert (
+            rendered.get("logging", "log_filename_template")
+            == "dag_id={{ ti.dag_id }}/run.log"
+        )
+
+
+def test_provider_config_rerendered_on_secret_changed(context, state, workload_container):
+    """A rotated provider secret is picked up without any relation churn."""
+    secret = _sensitive_secret({"provider__gcs__conn_id": "rotated-conn-id"})
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.secret_changed(secret), state_in)
+
     assert state_out.unit_status == ops.ActiveStatus()
 
     coordinator_relations = state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME)
     assert coordinator_relations
     for coordinator_relation in coordinator_relations:
-        # Non-sensitive provider config is still merged.
-        parsed = _parse(coordinator_relation.local_app_data.get("config-template", ""))
-        assert parsed.get("gcs", "project") == "my-project"
-
-        # No provider sensitive values were distributed (secret was unreadable).
         sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
-        assert "provider__gcs__conn_id" not in sensitive_data
+        assert sensitive_data["provider__gcs__conn_id"] == "rotated-conn-id"
 
 
 def test_provider_config_invalid_ini_blocks(context, state, workload_container):

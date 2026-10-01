@@ -52,6 +52,15 @@ WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
     "Waiting for the provider configuration secret to be granted"
 )
 INVALID_PROVIDER_CONFIG_MESSAGE = "Provider configuration is not valid INI"
+
+# Namespace every provider-supplied sensitive value must live under, so that it
+# can never shadow a coordinator-owned placeholder such as `core__fernet_key`.
+PROVIDER_SENSITIVE_KEY_PREFIX = "provider__"
+DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE = (
+    "Dropped provider sensitive values outside the "
+    f"`{PROVIDER_SENSITIVE_KEY_PREFIX}` namespace"
+)
+ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE = "Escaped template syntax in provider configuration"
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
 INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
 MISSING_FERNET_KEY_IN_SECRET_MESSAGE = "Missing fernet key in secret"

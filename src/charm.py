@@ -5,8 +5,11 @@
 """The Airflow Coordinator charm application."""
 
 import configparser
+import dataclasses
+import functools
 import json
 import logging
+import re
 import secrets
 import zoneinfo
 
@@ -30,6 +33,68 @@ import webserver_config_generator
 
 logger = logging.getLogger(__name__)
 
+# Opening Jinja2 delimiters. Only the opening ones need neutralising: a stray
+# `}}`/`%}`/`#}` with no matching opener is plain text to Jinja2.
+_JINJA_OPENING_DELIMITERS = re.compile(r"\{\{|\{%|\{#")
+
+# A well-formed sensitive-value placeholder as emitted by the provider
+# configurator, e.g. `{{ provider__gcs__password }}`.
+_PROVIDER_PLACEHOLDER = re.compile(
+    r"\{\{\s*(" + constants.PROVIDER_SENSITIVE_KEY_PREFIX + r"[A-Za-z0-9_]+)\s*\}\}"
+)
+
+
+def _escape_jinja(text: str) -> str:
+    """Return ``text`` with every Jinja2 opening delimiter rendered inert.
+
+    Each delimiter is replaced by an expression that evaluates back to the
+    literal characters, so ``{{ ti.dag_id }}`` survives rendering as the literal
+    string ``{{ ti.dag_id }}`` instead of being evaluated.
+    """
+    return _JINJA_OPENING_DELIMITERS.sub(lambda match: "{{ '" + match.group(0) + "' }}", text)
+
+
+def _sanitise_provider_value(value: str, known_placeholders: set[str]) -> tuple[str, bool]:
+    """Neutralise Jinja2 syntax in a provider value, keeping real placeholders live.
+
+    Only ``{{ provider__* }}`` placeholders that are actually backed by a
+    sensitive value are left intact. Everything else -- arbitrary expressions,
+    statement blocks, and placeholders with no backing value -- is escaped, so
+    that untrusted repository content can neither execute during rendering nor
+    silently render as an empty credential.
+
+    Returns the sanitised value and whether anything had to be escaped.
+    """
+    parts: list[str] = []
+    escaped = False
+    cursor = 0
+    for match in _PROVIDER_PLACEHOLDER.finditer(value):
+        if match.group(1) not in known_placeholders:
+            # Unbacked placeholder: leave it in the segment so it gets escaped.
+            continue
+        segment = _escape_jinja(value[cursor : match.start()])
+        escaped = escaped or segment != value[cursor : match.start()]
+        parts.append(segment)
+        parts.append(match.group(0))
+        cursor = match.end()
+    tail = _escape_jinja(value[cursor:])
+    escaped = escaped or tail != value[cursor:]
+    parts.append(tail)
+    return "".join(parts), escaped
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProviderPayload:
+    """Validated provider configuration, ready to merge into the airflow config.
+
+    ``config`` and ``sensitive_data`` are always consistent with each other: if
+    the sensitive values cannot be read, both are empty rather than distributing
+    a configuration whose placeholders would render blank.
+    """
+
+    config: dict = dataclasses.field(default_factory=dict)
+    sensitive_data: dict = dataclasses.field(default_factory=dict)
+
 
 class ExceptionWithStatusError(Exception):
     """Base class of exceptions for when a method has an opinion on the unit status."""
@@ -50,6 +115,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
+
+        # Non-blocking notices raised while reconciling, surfaced on ActiveStatus.
+        self._status_messages: list[str] = []
 
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
@@ -384,56 +452,65 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return relation
         return None
 
-    @property
-    def _provider_sensitive_data(self) -> dict:
-        """Return the sensitive provider values keyed for the config template.
+    @functools.cached_property
+    def _provider_payload(self) -> _ProviderPayload:
+        """Return the validated provider configuration and its sensitive values.
 
-        Mirrors the soft-failure behaviour of ``_kubernetes_executor_config``: if
-        the backing Juju secret is not yet readable (e.g. not granted to this
-        charm yet), log and proceed with an empty mapping rather than blocking the
-        whole reconcile (the agreed k8s-executor approach).
+        Both halves are computed together so they can never disagree, and cached
+        because the charm object is rebuilt per event -- the relation databag and
+        the backing secret are therefore read at most once per reconcile.
 
-        Returns an empty dict when there is no active relation.
-        """
-        if not self._provider_config_relation:
-            return {}
-        try:
-            return self._provider_config_requires.get_sensitive_data()
-        except provider_config.SecretNotReadyError:
-            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
-            return {}
+        The provider configurator is another application, so its data is
+        untrusted. Three things happen here before it is allowed anywhere near
+        the rendered config:
 
-    @property
-    def _provider_config(self) -> dict:
-        """Return provider configuration sections from the provider configurator relation.
+        * Sensitive values are restricted to the ``provider__`` namespace, so a
+          provider cannot overwrite a coordinator-owned placeholder such as
+          ``core__fernet_key``.
+        * Jinja2 syntax in the configuration is escaped unless it is a
+          placeholder backed by one of those sensitive values, which prevents
+          both template injection and blank-rendering credentials.
+        * If the sensitive values cannot be read at all, the configuration is
+          dropped wholesale rather than distributed with empty placeholders.
 
-        The provider configurator shares its non-sensitive configuration as a
-        Jinja2 template string, where sensitive values appear as
-        ``{{ provider__section__option }}`` placeholders. This parses that
-        template back into the ``{section: {option: value}}`` shape expected by
-        ``config_template_with_extra_config`` (using ``RawConfigParser`` so the
-        ``{{ ... }}`` and any ``%`` characters survive unmangled, and
-        ``optionxform`` preserved so option keys keep their case -- matching the
-        charmlib's ``configuration_keys()`` for the Layer 1 collision checks;
-        note the downstream generator currently lowercases on output).
-
-        Returns an empty dict when the relation is not established/active or the
-        provider has not shared configuration yet.
-
-        Provider-supplied keys that collide with coordinator-owned configuration
-        are not filtered here: that is Layer 1 validation, which computes the
-        owned-key set from the rendered config and lands in a follow-up change.
+        Per spec section 3.4, dropped configuration is logged and surfaced as a
+        status message but never blocks the unit. Malformed INI is the exception:
+        that is a broken provider, not a rejected value.
 
         Raises:
             ExceptionWithStatusError: BlockedStatus if the provider's template is
                 not valid INI (malformed data from another application).
         """
         if not self._provider_config_relation:
-            return {}
+            return _ProviderPayload()
+
         template = self._provider_config_requires.configurations()
         if not template:
             logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
-            return {}
+            return _ProviderPayload()
+
+        try:
+            raw_sensitive_data = self._provider_config_requires.get_sensitive_data()
+        except (provider_config.SecretNotReadyError, ops.ModelError):
+            # Not granted yet, or granted and then revoked (which surfaces as a
+            # ModelError rather than SecretNotFoundError). Proceed without the
+            # provider configuration entirely: rendering it now would write empty
+            # credentials into every core charm's airflow.cfg.
+            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            return _ProviderPayload()
+
+        sensitive_data = {
+            key: value
+            for key, value in raw_sensitive_data.items()
+            if key.startswith(constants.PROVIDER_SENSITIVE_KEY_PREFIX)
+        }
+        if dropped := sorted(set(raw_sensitive_data) - set(sensitive_data)):
+            logger.warning(
+                "%s: %s", constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE, ", ".join(dropped)
+            )
+            self._status_messages.append(constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE)
+
         parser = configparser.RawConfigParser()
         parser.optionxform = str  # type: ignore[assignment, method-assign]
         try:
@@ -443,13 +520,49 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.INVALID_PROVIDER_CONFIG_MESSAGE, ops.BlockedStatus
             ) from e
 
-        return {
-            section: {
-                option: parser.get(section, option, raw=True)
-                for option in parser.options(section)
-            }
-            for section in parser.sections()
-        }
+        known_placeholders = set(sensitive_data)
+        config: dict = {}
+        escaped = False
+        for section in parser.sections():
+            # Section and option names can carry Jinja2 too, and never legitimately
+            # contain a placeholder, so they are escaped unconditionally.
+            safe_section = _escape_jinja(section)
+            escaped = escaped or safe_section != section
+            options: dict = {}
+            for option in parser.options(section):
+                safe_option = _escape_jinja(option)
+                escaped = escaped or safe_option != option
+                safe_value, value_escaped = _sanitise_provider_value(
+                    parser.get(section, option, raw=True), known_placeholders
+                )
+                escaped = escaped or value_escaped
+                options[safe_option] = safe_value
+            config[safe_section] = options
+
+        if escaped:
+            logger.warning(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
+            self._status_messages.append(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
+
+        return _ProviderPayload(config=config, sensitive_data=sensitive_data)
+
+    @property
+    def _provider_sensitive_data(self) -> dict:
+        """Return the sensitive provider values keyed for the config template."""
+        return self._provider_payload.sensitive_data
+
+    @property
+    def _provider_config(self) -> dict:
+        """Return provider configuration sections in ``{section: {option: value}}`` shape.
+
+        Option keys keep their case (matching the charmlib's
+        ``configuration_keys()`` for the Layer 1 collision checks; note the
+        downstream generator currently lowercases on output).
+
+        Provider-supplied keys that collide with coordinator-owned configuration
+        are not filtered here: that is Layer 1 validation, which computes the
+        owned-key set from the rendered config and lands in a follow-up change.
+        """
+        return self._provider_payload.config
 
     @property
     def _oauth_active(self) -> bool:
@@ -672,8 +785,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_CONFIG_PATH,
             self._airflow_config_template,
             {
-                **self._config_generator.sensitive_config_values,
+                # Provider values first: coordinator-owned secrets must win any
+                # clash. The `provider__` namespace filter already makes a clash
+                # impossible; ordering keeps that true if the filter ever moves.
                 **self._provider_sensitive_data,
+                **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
             },
             user=constants.WORKLOAD_USER,
@@ -726,9 +842,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._reconcile_dag_bundle_remote_connections()
 
             sensitive_data = {
+                # Provider values first; see _write_airflow_config.
+                **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 **self._webserver_config_generator.sensitive_values,
-                **self._provider_sensitive_data,
                 "render_sensitive_data": True,
             }
 
@@ -760,7 +877,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(e.message)
             return
 
-        self.unit.status = ops.ActiveStatus()
+        # Dropped provider configuration is reported without blocking (spec 3.4).
+        self.unit.status = ops.ActiveStatus("; ".join(self._status_messages))
 
 
 if __name__ == "__main__":  # pragma: nocover
