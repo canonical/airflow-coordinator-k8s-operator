@@ -24,6 +24,7 @@ import json
 import jinja2
 import ops
 import ops.testing
+import pytest
 
 import constants
 
@@ -268,6 +269,7 @@ def test_provider_config_jinja_is_escaped(context, state, workload_container):
         'injected = {{ "".__class__.__mro__[1].__subclasses__()|length }}\n'
         "stolen = {{ core__fernet_key }}\n"
         "unbacked = {{ provider__gcs__missing }}\n"
+        "fused = {{{ provider__gcs__conn_id }}\n"
         "[logging]\n"
         "log_filename_template = dag_id={{ ti.dag_id }}/run.log\n"
     )
@@ -309,6 +311,10 @@ def test_provider_config_jinja_is_escaped(context, state, workload_container):
 
         # An unbacked provider placeholder stays visible rather than rendering blank.
         assert rendered.get("gcs", "unbacked") == "{{ provider__gcs__missing }}"
+
+        # A stray `{` immediately before a backed placeholder must not fuse with it
+        # into an unparsable `{{{ ... }}` -- that would crash every core charm.
+        assert rendered.get("gcs", "fused") == "{my-secret-conn-id"
 
         # A legitimate Airflow setting containing Jinja2 reaches airflow.cfg intact,
         # for Airflow itself to template at runtime.
@@ -355,3 +361,63 @@ def test_provider_config_invalid_ini_blocks(context, state, workload_container):
     state_out = context.run(context.on.start(), state_in)
 
     assert state_out.unit_status == ops.BlockedStatus(constants.INVALID_PROVIDER_CONFIG_MESSAGE)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param({"wrong-key": "{}"}, id="missing-sensitive-data-key"),
+        pytest.param({SENSITIVE_DATA_SECRET_KEY: "not json"}, id="invalid-json"),
+        pytest.param({SENSITIVE_DATA_SECRET_KEY: "[1, 2, 3]"}, id="json-array"),
+        pytest.param({SENSITIVE_DATA_SECRET_KEY: '"a string"'}, id="json-string"),
+    ],
+)
+def test_provider_config_malformed_secret_blocks(context, state, workload_container, content):
+    """A readable-but-malformed provider secret -> BlockedStatus, not a hook crash.
+
+    The interface only promises the shape; a buggy provider can still store a
+    secret with the wrong key, invalid JSON, or JSON that is not an object. Each
+    of those reaches the coordinator as a bare KeyError / ValueError /
+    AttributeError and would otherwise fail the hook.
+    """
+    secret = ops.testing.Secret(content)
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.BlockedStatus(
+        constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE
+    )
+
+
+def test_provider_config_recovers_when_malformed_secret_is_fixed(
+    context, state, workload_container
+):
+    """A blocked unit self-heals once the provider repairs its secret.
+
+    Blocking on a malformed secret is only safe if the block clears on its own
+    when the provider is fixed -- otherwise an operator would have to intervene
+    on every coordinator unit. The repaired secret arrives as a `secret-changed`
+    event with no relation churn, so that event alone must drive the unit back to
+    active *and* distribute the configuration that was withheld while blocked.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+        unit_status=ops.BlockedStatus(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE),
+    )
+
+    state_out = context.run(context.on.secret_changed(secret), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus()
+    assert _provider_section_present(state_out)

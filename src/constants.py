@@ -52,6 +52,9 @@ WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
     "Waiting for the provider configuration secret to be granted"
 )
 INVALID_PROVIDER_CONFIG_MESSAGE = "Provider configuration is not valid INI"
+INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE = (
+    "Provider configuration secret does not contain a valid sensitive data object"
+)
 
 # Namespace every provider-supplied sensitive value must live under, so that it
 # can never shadow a coordinator-owned placeholder such as `core__fernet_key`.

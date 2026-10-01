@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 
 # Opening Jinja2 delimiters. Only the opening ones need neutralising: a stray
 # `}}`/`%}`/`#}` with no matching opener is plain text to Jinja2.
-_JINJA_OPENING_DELIMITERS = re.compile(r"\{\{|\{%|\{#")
+# A trailing `{` is also escaped: on its own it is inert, but the sanitiser
+# stitches escaped segments back together around surviving placeholders, so a
+# segment ending in `{` would otherwise fuse with the following `{{ ... }}` into
+# an unparsable `{{{ ... }}` and crash every charm that renders the template.
+_JINJA_OPENING_DELIMITERS = re.compile(r"\{\{|\{%|\{#|\{\Z")
 
 # A well-formed sensitive-value placeholder as emitted by the provider
 # configurator, e.g. `{{ provider__gcs__password }}`.
@@ -452,6 +456,44 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return relation
         return None
 
+    def _read_provider_sensitive_data(self) -> dict | None:
+        """Return the provider's sensitive values, or None if they are unavailable.
+
+        Returns:
+            The decoded placeholder -> value map, or None when the backing secret
+            is not readable yet (not granted, or granted and later revoked), in
+            which case the caller must drop the provider configuration entirely
+            rather than render blank credentials.
+
+        Raises:
+            ExceptionWithStatusError: BlockedStatus if the secret is readable but
+                its payload is not the shape the interface promises.
+        """
+        try:
+            sensitive_data = self._provider_config_requires.get_sensitive_data()
+        except (provider_config.SecretNotReadyError, ops.ModelError):
+            # Not granted yet, or granted and then revoked (which surfaces as a
+            # ModelError rather than SecretNotFoundError). This is transient and
+            # operator-resolvable, so it is a status message rather than a block.
+            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            return None
+        except (KeyError, ValueError, TypeError) as exc:
+            # The secret is readable but malformed: missing the `sensitive-data`
+            # key (KeyError) or holding invalid JSON (ValueError). A buggy
+            # provider will not heal on its own, so surface it the way malformed
+            # INI is surfaced instead of crashing the hook.
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
+            ) from exc
+
+        if not isinstance(sensitive_data, dict):
+            # Valid JSON, but an array or scalar rather than the promised object.
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
+            )
+        return sensitive_data
+
     @functools.cached_property
     def _provider_payload(self) -> _ProviderPayload:
         """Return the validated provider configuration and its sensitive values.
@@ -479,7 +521,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         Raises:
             ExceptionWithStatusError: BlockedStatus if the provider's template is
-                not valid INI (malformed data from another application).
+                not valid INI, or its secret payload is malformed (broken data
+                from another application).
         """
         if not self._provider_config_relation:
             return _ProviderPayload()
@@ -489,15 +532,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
             return _ProviderPayload()
 
-        try:
-            raw_sensitive_data = self._provider_config_requires.get_sensitive_data()
-        except (provider_config.SecretNotReadyError, ops.ModelError):
-            # Not granted yet, or granted and then revoked (which surfaces as a
-            # ModelError rather than SecretNotFoundError). Proceed without the
-            # provider configuration entirely: rendering it now would write empty
-            # credentials into every core charm's airflow.cfg.
-            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
-            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+        raw_sensitive_data = self._read_provider_sensitive_data()
+        if raw_sensitive_data is None:
             return _ProviderPayload()
 
         sensitive_data = {
