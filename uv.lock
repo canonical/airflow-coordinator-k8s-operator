@@ -39,7 +39,7 @@ unit = [
 
 [package.metadata]
 requires-dist = [
-    { name = "airflow-provider-configurator-charmlib", git = "https://github.com/canonical/airflow-provider-configurator.git?subdirectory=lib&rev=27439ea5adda35854168a18a1ec0c8e871cd39a3" },
+    { name = "airflow-provider-configurator-charmlib", git = "https://github.com/canonical/airflow-provider-configurator.git?subdirectory=lib&rev=track%2F1.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "mergedeep", specifier = ">=1.3.4" },
@@ -70,7 +70,7 @@ unit = [
 [[package]]
 name = "airflow-provider-configurator-charmlib"
 version = "0.1.0"
-source = { git = "https://github.com/canonical/airflow-provider-configurator.git?subdirectory=lib&rev=27439ea5adda35854168a18a1ec0c8e871cd39a3#27439ea5adda35854168a18a1ec0c8e871cd39a3" }
+source = { git = "https://github.com/canonical/airflow-provider-configurator.git?subdirectory=lib&rev=track%2F1.0#32c2681d88c6ab84f4ed55e81461ebde968e0827" }
 dependencies = [
     { name = "ops" },
 ]

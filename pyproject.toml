@@ -20,7 +20,7 @@ dependencies = [
     # published to PyPI. Direct-URL (PEP 508) reference so plain pip (tox
     # lint/format/unit envs) resolves it too, not just uv/charmcraft.
     # TODO: swap for a PyPI version range before GA (see enhancement issue).
-    "airflow-provider-configurator-charmlib @ git+https://github.com/canonical/airflow-provider-configurator.git@27439ea5adda35854168a18a1ec0c8e871cd39a3#subdirectory=lib",
+    "airflow-provider-configurator-charmlib @ git+https://github.com/canonical/airflow-provider-configurator.git@track/1.0#subdirectory=lib",
 ]
 
 [dependency-groups]
