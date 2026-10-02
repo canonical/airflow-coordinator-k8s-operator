@@ -29,6 +29,8 @@ integration debug="": (clean)
 
 	cd tests/integration/mock-core-charm && charmcraft pack && cd -
 
+	cd tests/integration/mock-provider-charm && charmcraft pack && cd -
+
 	pdb_options=$(if [ -n "${debug}" ]; then echo "--pdb"; fi)
 
 	JUJU_MODEL=test uv tool run tox -e integration -- ${pdb_options}

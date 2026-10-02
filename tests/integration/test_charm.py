@@ -4,9 +4,11 @@
 # The integration tests use the Jubilant library. See https://documentation.ubuntu.com/jubilant/
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
+import collections.abc
 import json
 import logging
 import pathlib
+import time
 
 import cryptography.fernet
 import jubilant
@@ -436,3 +438,212 @@ def test_airflow_keys_persist_across_relation_cycles(juju: jubilant.Juju):
         assert sensitive["core__fernet_key"] == _initial_airflow_keys["core__fernet_key"], (
             f"{component}: core__fernet_key changed after relation cycles"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Provider configuration (airflow_provider_configuration relation)
+#
+# These run against the deployment built up by the tests above, so the
+# assertions can check that provider configuration reaches every core charm,
+# not just the coordinator. The mock provider publishes without validating, which
+# is what makes it useful: the coordinator's sanitiser is the component under
+# test and it must hold even when the provider is hostile or broken.
+# --------------------------------------------------------------------------- #
+
+PROVIDER_APP = "mock-provider"
+
+# A template exercising every Jinja2 construct the sanitiser neutralises. The
+# `leak` option is the important one: `core__fernet_key` is a real key in the
+# coordinator's own render context, so if escaping regressed this renders the
+# live Fernet key into a provider-controlled option.
+HOSTILE_TEMPLATE = """\
+[provider_escaping]
+ssti = {{ ''.__class__.__mro__[1].__subclasses__() }}
+leak = {{ core__fernet_key }}
+loop = {% for x in range(3) %}x{% endfor %}
+comment = {# hidden #}
+fused = {{{ provider__demo__token }}
+resolved = {{ provider__demo__token }}
+"""
+
+PROVIDER_TOKEN = "s3cr3t-provider-token"
+
+
+def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
+    """Return the distinct airflow.cfg contents across all mocked core charms."""
+    return {
+        juju.run(f"airflow-{component}-mock/0", "get-airflow-config").results["airflow-config"]
+        for component in AIRFLOW_COMPONENTS
+    }
+
+
+def _wait_for_core_configs(
+    juju: jubilant.Juju,
+    predicate: collections.abc.Callable[[str], bool],
+    timeout: int = 300,
+) -> str:
+    """Return the config once every core charm agrees on one satisfying ``predicate``.
+
+    Publishing provider configuration never takes any unit out of ``active``, so
+    waiting on ``all_active`` would return before the relation-changed hooks have
+    even fired and assert against the previous config. The settled state has to be
+    identified by its content instead.
+
+    Requiring a single distinct config across all four core charms also makes this
+    assert propagation rather than just the coordinator's local view.
+    """
+    deadline = time.monotonic() + timeout
+    configs: set[str] = set()
+
+    while True:
+        juju.wait(jubilant.all_active)
+        configs = _core_charm_configs(juju)
+        if len(configs) == 1 and predicate(next(iter(configs))):
+            return next(iter(configs))
+        if time.monotonic() > deadline:
+            raise AssertionError(
+                f"Core charms did not converge on the expected config within {timeout}s "
+                f"({len(configs)} distinct config(s) observed)"
+            )
+        time.sleep(5)
+
+
+def test_provider_configuration_is_merged_and_distributed(
+    juju: jubilant.Juju, mock_provider_charm: pathlib.Path
+):
+    """Provider config reaches every core charm with its sensitive values resolved."""
+    logger.info("Deploying mock provider configurator")
+
+    juju.deploy(mock_provider_charm.resolve(), app=PROVIDER_APP)
+    juju.wait(lambda status: jubilant.all_active(status, PROVIDER_APP))
+
+    juju.integrate(
+        "airflow-coordinator-k8s:airflow-provider-configuration",
+        f"{PROVIDER_APP}:airflow-provider-configuration",
+    )
+
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": "[provider_demo]\nconn_id = {{ provider__demo__token }}\n",
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" in c)
+
+    assert f"conn_id = {PROVIDER_TOKEN}" in config
+
+    # Coordinator-owned configuration must survive the merge untouched.
+    assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+
+
+def test_provider_configuration_jinja_is_escaped(juju: jubilant.Juju):
+    """A hostile template renders as literal text instead of being evaluated."""
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": HOSTILE_TEMPLATE,
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "[provider_escaping]" in c)
+
+    # Every construct survives as the literal characters the provider sent.
+    assert "ssti = {{ ''.__class__.__mro__[1].__subclasses__() }}" in config
+    assert "loop = {% for x in range(3) %}x{% endfor %}" in config
+    assert "comment = {# hidden #}" in config
+
+    # The coordinator's Fernet key is in scope while this template renders, so
+    # this asserts the escaping actually prevents exfiltration rather than just
+    # producing syntactically inert output.
+    assert "leak = {{ core__fernet_key }}" in config
+    fernet_key = _initial_airflow_keys["core__fernet_key"]
+    assert f"leak = {fernet_key}" not in config
+
+    # Namespaced placeholders are still substituted, including one deliberately
+    # fused against a stray brace, which previously produced `{{{ ... }}` and
+    # crashed every charm rendering the template.
+    assert f"fused = {{{PROVIDER_TOKEN}" in config
+    assert f"resolved = {PROVIDER_TOKEN}" in config
+
+
+def test_provider_sensitive_keys_outside_namespace_are_dropped(juju: jubilant.Juju):
+    """A provider cannot override coordinator-owned sensitive values."""
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": "[provider_demo]\nconn_id = {{ provider__demo__token }}\n",
+            "sensitive-data": json.dumps(
+                {
+                    "provider__demo__token": PROVIDER_TOKEN,
+                    # Not in the `provider__` namespace: must never reach the
+                    # render context, or a provider could rewrite the key that
+                    # protects every stored Airflow connection.
+                    "core__fernet_key": "attacker-controlled-fernet-key",
+                }
+            ),
+        },
+    )
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE
+            in status.apps["airflow-coordinator-k8s"].app_status.message
+        )
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" in c)
+
+    assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+    assert "attacker-controlled-fernet-key" not in config
+
+
+def test_provider_configuration_dropped_when_secret_unreadable(juju: jubilant.Juju):
+    """Revoking the secret drops provider config without blocking the coordinator.
+
+    This is the branch that only exists because a revoked secret surfaces as a
+    bare ModelError. No Scenario test can reach it, since the behaviour comes
+    from Juju rather than from ops.
+    """
+    juju.run(f"{PROVIDER_APP}/0", "revoke-secret")
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE
+            in status.apps["airflow-coordinator-k8s"].app_status.message
+        )
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" not in c)
+
+    # The whole provider contribution is withdrawn: partially rendered config
+    # with empty placeholders would be worse than none at all.
+    assert PROVIDER_TOKEN not in config
+    assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+
+
+def test_provider_relation_removed_restores_baseline(juju: jubilant.Juju):
+    """Removing the provider relation returns the config to its pre-provider state."""
+    juju.remove_relation(
+        "airflow-coordinator-k8s:airflow-provider-configuration",
+        f"{PROVIDER_APP}:airflow-provider-configuration",
+    )
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and status.apps["airflow-coordinator-k8s"].app_status.message == ""
+        )
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "provider_demo" not in c)
+
+    assert "provider_escaping" not in config
+    assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
