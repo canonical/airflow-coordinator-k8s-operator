@@ -4,11 +4,16 @@
 
 """The Airflow Coordinator charm application."""
 
+import configparser
+import dataclasses
+import functools
 import json
 import logging
+import re
 import secrets
 import zoneinfo
 
+import airflow_provider_configurator as provider_config
 import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
@@ -27,6 +32,72 @@ import constants
 import webserver_config_generator
 
 logger = logging.getLogger(__name__)
+
+# Opening Jinja2 delimiters. Only the opening ones need neutralising: a stray
+# `}}`/`%}`/`#}` with no matching opener is plain text to Jinja2.
+# A trailing `{` is also escaped: on its own it is inert, but the sanitiser
+# stitches escaped segments back together around surviving placeholders, so a
+# segment ending in `{` would otherwise fuse with the following `{{ ... }}` into
+# an unparsable `{{{ ... }}` and crash every charm that renders the template.
+_JINJA_OPENING_DELIMITERS = re.compile(r"\{\{|\{%|\{#|\{\Z")
+
+# A well-formed sensitive-value placeholder as emitted by the provider
+# configurator, e.g. `{{ provider__gcs__password }}`.
+_PROVIDER_PLACEHOLDER = re.compile(
+    r"\{\{\s*(" + constants.PROVIDER_SENSITIVE_KEY_PREFIX + r"[A-Za-z0-9_]+)\s*\}\}"
+)
+
+
+def _escape_jinja(text: str) -> str:
+    """Return ``text`` with every Jinja2 opening delimiter rendered inert.
+
+    Each delimiter is replaced by an expression that evaluates back to the
+    literal characters, so ``{{ ti.dag_id }}`` survives rendering as the literal
+    string ``{{ ti.dag_id }}`` instead of being evaluated.
+    """
+    return _JINJA_OPENING_DELIMITERS.sub(lambda match: "{{ '" + match.group(0) + "' }}", text)
+
+
+def _sanitise_provider_value(value: str, known_placeholders: set[str]) -> tuple[str, bool]:
+    """Neutralise Jinja2 syntax in a provider value, keeping real placeholders live.
+
+    Only ``{{ provider__* }}`` placeholders that are actually backed by a
+    sensitive value are left intact. Everything else -- arbitrary expressions,
+    statement blocks, and placeholders with no backing value -- is escaped, so
+    that untrusted repository content can neither execute during rendering nor
+    silently render as an empty credential.
+
+    Returns the sanitised value and whether anything had to be escaped.
+    """
+    parts: list[str] = []
+    escaped = False
+    cursor = 0
+    for match in _PROVIDER_PLACEHOLDER.finditer(value):
+        if match.group(1) not in known_placeholders:
+            # Unbacked placeholder: leave it in the segment so it gets escaped.
+            continue
+        segment = _escape_jinja(value[cursor : match.start()])
+        escaped = escaped or segment != value[cursor : match.start()]
+        parts.append(segment)
+        parts.append(match.group(0))
+        cursor = match.end()
+    tail = _escape_jinja(value[cursor:])
+    escaped = escaped or tail != value[cursor:]
+    parts.append(tail)
+    return "".join(parts), escaped
+
+
+@dataclasses.dataclass(frozen=True)
+class _ProviderPayload:
+    """Validated provider configuration, ready to merge into the airflow config.
+
+    ``config`` and ``sensitive_data`` are always consistent with each other: if
+    the sensitive values cannot be read, both are empty rather than distributing
+    a configuration whose placeholders would render blank.
+    """
+
+    config: dict = dataclasses.field(default_factory=dict)
+    sensitive_data: dict = dataclasses.field(default_factory=dict)
 
 
 class ExceptionWithStatusError(Exception):
@@ -48,6 +119,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
+
+        # Non-blocking notices raised while reconciling, surfaced on ActiveStatus.
+        self._status_messages: list[str] = []
 
         self._container = self.unit.get_container(constants.WORKLOAD_CONTAINER_NAME)
         self._config_generator = config_generator.AirflowConfigGenerator(self)
@@ -85,6 +159,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             callback=self._reconcile,
         )
 
+        self._provider_config_requires = provider_config.AirflowProviderConfiguratorRequires(
+            self,
+            constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME,
+        )
+
         self._oauth_requirer = oauth.OAuthRequirer(
             self, relation_name=constants.OAUTH_ENDPOINT_NAME
         )
@@ -99,11 +178,14 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on.start,
             self.on.config_changed,
             self.on.update_status,
+            self.on.secret_changed,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
             self.on[constants.POSTGRES_RELATION_NAME].relation_broken,
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
+            self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_changed,
+            self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_broken,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
@@ -360,6 +442,174 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         return content.kubernetes_executor_pod_spec
 
     @property
+    def _provider_config_relation(self) -> ops.Relation | None:
+        """Return the active provider-configuration relation, if any.
+
+        Guards on ``relation.active`` (not just presence) so that during the
+        ``relation-broken`` hook -- when ``get_relation`` still returns the
+        departing relation -- provider configuration is treated as absent and
+        removed from the distributed airflow.cfg entirely (spec: config must be
+        gone on relation_broken).
+        """
+        relation = self.model.get_relation(constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME)
+        if relation and relation.active:
+            return relation
+        return None
+
+    def _read_provider_sensitive_data(self) -> dict | None:
+        """Return the provider's sensitive values, or None if they are unavailable.
+
+        Returns:
+            The decoded placeholder -> value map, or None when the backing secret
+            is not readable yet (not granted, or granted and later revoked), in
+            which case the caller must drop the provider configuration entirely
+            rather than render blank credentials.
+
+        Raises:
+            ExceptionWithStatusError: BlockedStatus if the secret is readable but
+                its payload is not the shape the interface promises.
+        """
+        try:
+            sensitive_data = self._provider_config_requires.get_sensitive_data()
+        except (provider_config.SecretNotReadyError, ops.ModelError) as exc:
+            # Not granted yet, or granted and then revoked (which surfaces as a
+            # bare ModelError rather than SecretNotFoundError, so it cannot be
+            # caught more narrowly). This is transient and operator-resolvable,
+            # so it is a status message rather than a block -- but ModelError is
+            # a broad base class, so log the real exception to keep an unrelated
+            # model failure from silently masquerading as "secret not granted".
+            logger.warning(
+                "%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc
+            )
+            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            return None
+        except (KeyError, ValueError, TypeError) as exc:
+            # The secret is readable but malformed: missing the `sensitive-data`
+            # key (KeyError) or holding invalid JSON (ValueError). A buggy
+            # provider will not heal on its own, so surface it the way malformed
+            # INI is surfaced instead of crashing the hook.
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
+            ) from exc
+
+        if not isinstance(sensitive_data, dict):
+            # Valid JSON, but an array or scalar rather than the promised object.
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
+            )
+        return sensitive_data
+
+    @functools.cached_property
+    def _provider_payload(self) -> _ProviderPayload:
+        """Return the validated provider configuration and its sensitive values.
+
+        Both halves are computed together so they can never disagree, and cached
+        because the charm object is rebuilt per event -- the relation databag and
+        the backing secret are therefore read at most once per reconcile.
+
+        The provider configurator is another application, so its data is
+        untrusted. Three things happen here before it is allowed anywhere near
+        the rendered config:
+
+        * Sensitive values are restricted to the ``provider__`` namespace, so a
+          provider cannot overwrite a coordinator-owned placeholder such as
+          ``core__fernet_key``.
+        * Jinja2 syntax in the configuration is escaped unless it is a
+          placeholder backed by one of those sensitive values, which prevents
+          both template injection and blank-rendering credentials.
+        * If the sensitive values cannot be read at all, the configuration is
+          dropped wholesale rather than distributed with empty placeholders.
+
+        Per spec section 3.4, dropped configuration is logged and surfaced as a
+        status message but never blocks the unit. Malformed INI is the exception:
+        that is a broken provider, not a rejected value.
+
+        Raises:
+            ExceptionWithStatusError: BlockedStatus if the provider's template is
+                not valid INI, or its secret payload is malformed (broken data
+                from another application).
+        """
+        if not self._provider_config_relation:
+            return _ProviderPayload()
+
+        template = self._provider_config_requires.configurations()
+        if not template:
+            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
+            return _ProviderPayload()
+
+        raw_sensitive_data = self._read_provider_sensitive_data()
+        if raw_sensitive_data is None:
+            return _ProviderPayload()
+
+        sensitive_data = {
+            key: value
+            for key, value in raw_sensitive_data.items()
+            if key.startswith(constants.PROVIDER_SENSITIVE_KEY_PREFIX)
+        }
+        if dropped := sorted(set(raw_sensitive_data) - set(sensitive_data)):
+            logger.warning(
+                "%s: %s", constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE, ", ".join(dropped)
+            )
+            self._status_messages.append(constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE)
+
+        # Deliberately left on configparser's default `optionxform`, which
+        # lowercases option names. The downstream generator does the same, so
+        # folding here keeps this dict faithful to what actually reaches
+        # airflow.cfg -- and means the Layer 1 collision checks built on it
+        # cannot be bypassed by spelling a reserved key as `Fernet_Key`.
+        parser = configparser.RawConfigParser()
+        try:
+            parser.read_string(template)
+        except configparser.Error as e:
+            raise ExceptionWithStatusError(
+                constants.INVALID_PROVIDER_CONFIG_MESSAGE, ops.BlockedStatus
+            ) from e
+
+        known_placeholders = set(sensitive_data)
+        config: dict = {}
+        escaped = False
+        for section in parser.sections():
+            # Section and option names can carry Jinja2 too, and never legitimately
+            # contain a placeholder, so they are escaped unconditionally.
+            safe_section = _escape_jinja(section)
+            escaped = escaped or safe_section != section
+            options: dict = {}
+            for option in parser.options(section):
+                safe_option = _escape_jinja(option)
+                escaped = escaped or safe_option != option
+                safe_value, value_escaped = _sanitise_provider_value(
+                    parser.get(section, option, raw=True), known_placeholders
+                )
+                escaped = escaped or value_escaped
+                options[safe_option] = safe_value
+            config[safe_section] = options
+
+        if escaped:
+            logger.warning(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
+            self._status_messages.append(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
+
+        return _ProviderPayload(config=config, sensitive_data=sensitive_data)
+
+    @property
+    def _provider_sensitive_data(self) -> dict:
+        """Return the sensitive provider values keyed for the config template."""
+        return self._provider_payload.sensitive_data
+
+    @property
+    def _provider_config(self) -> dict:
+        """Return provider configuration sections in ``{section: {option: value}}`` shape.
+
+        Option keys are lowercased, matching both configparser's default and the
+        downstream generator's output, so Layer 1 collision checks performed on
+        this dict see the same keys that reach the rendered airflow.cfg.
+
+        Provider-supplied keys that collide with coordinator-owned configuration
+        are not filtered here: that is Layer 1 validation, which computes the
+        owned-key set from the rendered config and lands in a follow-up change.
+        """
+        return self._provider_payload.config
+
+    @property
     def _oauth_active(self) -> bool:
         """Return True when the oauth relation has valid provider credentials."""
         if not self.model.get_relation(constants.OAUTH_ENDPOINT_NAME):
@@ -372,9 +622,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     @property
     def _airflow_config_template(self) -> str:
         """Airflow config template merged with additional runtime compiled configs."""
+        # Provider config is merged FIRST so every coordinator-managed extra
+        # (api server uri, dag bundles, k8s executor, core, auth) wins over it
+        # under mergedeep's last-wins semantics. Note this does not protect keys
+        # that only exist in the base template, since extras always layer over
+        # it; that is handled by Layer 1 validation in a follow-up change.
         return self._config_generator.config_template_with_extra_config(
             **mergedeep.merge(
                 {},
+                self._provider_config,
                 self._config_generator.api_server_uri_config,
                 self._config_generator.dag_bundle_config,
                 (self._kubernetes_executor_config or {}),
@@ -574,6 +830,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             constants.AIRFLOW_CONFIG_PATH,
             self._airflow_config_template,
             {
+                # Provider values first: coordinator-owned secrets must win any
+                # clash. The `provider__` namespace filter already makes a clash
+                # impossible; ordering keeps that true if the filter ever moves.
+                **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
             },
@@ -605,6 +865,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     constants.OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE, ops.BlockedStatus
                 )
 
+    @property
+    def _active_status_message(self) -> str:
+        """Return a single-line summary of the non-blocking notices, if any.
+
+        `juju status` renders the message in a table column, so joining several
+        sentences makes the first one unreadable. Only the first notice is shown
+        and the rest are counted; every notice is logged at WARNING in full as
+        it is raised.
+        """
+        if not self._status_messages:
+            return ""
+        first, *rest = self._status_messages
+        if not rest:
+            return first
+        return f"{first} (+{len(rest)} more, see logs)"
+
     def _reconcile(self, event: ops.EventBase) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
         if not self.unit.is_leader():
@@ -627,6 +903,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._reconcile_dag_bundle_remote_connections()
 
             sensitive_data = {
+                # Provider values first; see _write_airflow_config.
+                **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 **self._webserver_config_generator.sensitive_values,
                 "render_sensitive_data": True,
@@ -660,7 +938,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(e.message)
             return
 
-        self.unit.status = ops.ActiveStatus()
+        # Dropped provider configuration is reported without blocking (spec 3.4).
+        self.unit.status = ops.ActiveStatus(self._active_status_message)
 
 
 if __name__ == "__main__":  # pragma: nocover

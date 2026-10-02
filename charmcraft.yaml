@@ -32,6 +32,11 @@ parts:
     source: .
     build-snaps:
       - astral-uv
+    build-packages:
+      # Required so uv can clone the git-installed
+      # airflow-provider-configurator-charmlib during pack. Remove once the
+      # charmlib is consumed from PyPI (see enhancement issue).
+      - git
   files:
     plugin: dump
     source: .
@@ -61,6 +66,10 @@ requires:
   airflow-kubernetes-executor-config:
     interface: airflow_kubernetes_executor
     limit: 1
+  airflow-provider-configuration:
+    interface: airflow_provider_configuration
+    limit: 1
+    optional: true
   s3:
     interface: s3
   git:

@@ -90,3 +90,28 @@ def mock_core_charm():
         raise ValueError(f"More than one mock core .charm file in current directory: {path_list}")
 
     return charm_paths[0]
+
+
+@pytest.fixture(scope="session")
+def mock_provider_charm():
+    """Build and return the mock provider configurator charm to use in tests."""
+    if "MOCK_PROVIDER_CHARM_PATH" in os.environ:
+        charm_path = pathlib.Path(os.environ["MOCK_PROVIDER_CHARM_PATH"])
+        if not charm_path.exists():
+            raise FileNotFoundError(f"Mock provider charm does not exist: {charm_path}")
+        return charm_path
+
+    # Modify below if you're building for multiple bases or architectures.
+    charm_paths = list(
+        pathlib.Path("./tests/integration/mock-provider-charm").glob("mock-provider-charm*.charm")
+    )
+    if not charm_paths:
+        raise FileNotFoundError("No mock provider .charm file in current directory")
+
+    if len(charm_paths) > 1:
+        path_list = ", ".join(str(path) for path in charm_paths)
+        raise ValueError(
+            f"More than one mock provider .charm file in current directory: {path_list}"
+        )
+
+    return charm_paths[0]

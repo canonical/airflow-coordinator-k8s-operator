@@ -16,6 +16,11 @@ dependencies = [
     "object-storage-charmlib>=0.1.0, <1.0.0",
     "mergedeep>=1.3.4",
     "jsonschema>=4.26.0",
+    # Interim git install until airflow-provider-configurator-charmlib is
+    # published to PyPI. Direct-URL (PEP 508) reference so plain pip (tox
+    # lint/format/unit envs) resolves it too, not just uv/charmcraft.
+    # TODO: swap for a PyPI version range before GA (see enhancement issue).
+    "airflow-provider-configurator-charmlib @ git+https://github.com/canonical/airflow-provider-configurator.git@track/1.0#subdirectory=lib",
 ]
 
 [dependency-groups]
