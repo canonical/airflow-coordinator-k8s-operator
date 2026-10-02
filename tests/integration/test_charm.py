@@ -491,12 +491,17 @@ def _wait_for_core_configs(
 
     Requiring a single distinct config across all four core charms also makes this
     assert propagation rather than just the coordinator's local view.
+
+    A charm that chokes on the published configuration lands in ``error`` and stays
+    there, so ``all_active`` can never come true and the wait would otherwise burn
+    its full timeout and report nothing but "timed out". Tripping on ``any_error``
+    instead fails in seconds and puts the offending unit's status in the message.
     """
     deadline = time.monotonic() + timeout
     configs: set[str] = set()
 
     while True:
-        juju.wait(jubilant.all_active)
+        juju.wait(jubilant.all_active, error=jubilant.any_error)
         configs = _core_charm_configs(juju)
         if len(configs) == 1 and predicate(next(iter(configs))):
             return next(iter(configs))
@@ -595,7 +600,8 @@ def test_provider_sensitive_keys_outside_namespace_are_dropped(juju: jubilant.Ju
             jubilant.all_active(status)
             and constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE
             in status.apps["airflow-coordinator-k8s"].app_status.message
-        )
+        ),
+        error=jubilant.any_error,
     )
 
     config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" in c)
@@ -618,7 +624,8 @@ def test_provider_configuration_dropped_when_secret_unreadable(juju: jubilant.Ju
             jubilant.all_active(status)
             and constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE
             in status.apps["airflow-coordinator-k8s"].app_status.message
-        )
+        ),
+        error=jubilant.any_error,
     )
 
     config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" not in c)
@@ -640,7 +647,8 @@ def test_provider_relation_removed_restores_baseline(juju: jubilant.Juju):
         lambda status: (
             jubilant.all_active(status)
             and status.apps["airflow-coordinator-k8s"].app_status.message == ""
-        )
+        ),
+        error=jubilant.any_error,
     )
 
     config = _wait_for_core_configs(juju, lambda c: "provider_demo" not in c)
