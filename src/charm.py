@@ -471,11 +471,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """
         try:
             sensitive_data = self._provider_config_requires.get_sensitive_data()
-        except (provider_config.SecretNotReadyError, ops.ModelError):
+        except (provider_config.SecretNotReadyError, ops.ModelError) as exc:
             # Not granted yet, or granted and then revoked (which surfaces as a
-            # ModelError rather than SecretNotFoundError). This is transient and
-            # operator-resolvable, so it is a status message rather than a block.
-            logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+            # bare ModelError rather than SecretNotFoundError, so it cannot be
+            # caught more narrowly). This is transient and operator-resolvable,
+            # so it is a status message rather than a block -- but ModelError is
+            # a broad base class, so log the real exception to keep an unrelated
+            # model failure from silently masquerading as "secret not granted".
+            logger.warning(
+                "%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc
+            )
             self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
             return None
         except (KeyError, ValueError, TypeError) as exc:
@@ -547,8 +552,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             )
             self._status_messages.append(constants.DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE)
 
+        # Deliberately left on configparser's default `optionxform`, which
+        # lowercases option names. The downstream generator does the same, so
+        # folding here keeps this dict faithful to what actually reaches
+        # airflow.cfg -- and means the Layer 1 collision checks built on it
+        # cannot be bypassed by spelling a reserved key as `Fernet_Key`.
         parser = configparser.RawConfigParser()
-        parser.optionxform = str  # type: ignore[assignment, method-assign]
         try:
             parser.read_string(template)
         except configparser.Error as e:
@@ -590,9 +599,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
     def _provider_config(self) -> dict:
         """Return provider configuration sections in ``{section: {option: value}}`` shape.
 
-        Option keys keep their case (matching the charmlib's
-        ``configuration_keys()`` for the Layer 1 collision checks; note the
-        downstream generator currently lowercases on output).
+        Option keys are lowercased, matching both configparser's default and the
+        downstream generator's output, so Layer 1 collision checks performed on
+        this dict see the same keys that reach the rendered airflow.cfg.
 
         Provider-supplied keys that collide with coordinator-owned configuration
         are not filtered here: that is Layer 1 validation, which computes the
@@ -856,6 +865,22 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     constants.OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE, ops.BlockedStatus
                 )
 
+    @property
+    def _active_status_message(self) -> str:
+        """Return a single-line summary of the non-blocking notices, if any.
+
+        `juju status` renders the message in a table column, so joining several
+        sentences makes the first one unreadable. Only the first notice is shown
+        and the rest are counted; every notice is logged at WARNING in full as
+        it is raised.
+        """
+        if not self._status_messages:
+            return ""
+        first, *rest = self._status_messages
+        if not rest:
+            return first
+        return f"{first} (+{len(rest)} more, see logs)"
+
     def _reconcile(self, event: ops.EventBase) -> None:
         """Idempotent reconcile method to handle most relevant charm events."""
         if not self.unit.is_leader():
@@ -914,7 +939,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return
 
         # Dropped provider configuration is reported without blocking (spec 3.4).
-        self.unit.status = ops.ActiveStatus("; ".join(self._status_messages))
+        self.unit.status = ops.ActiveStatus(self._active_status_message)
 
 
 if __name__ == "__main__":  # pragma: nocover

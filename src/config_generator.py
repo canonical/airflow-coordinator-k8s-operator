@@ -83,9 +83,16 @@ class AirflowConfigGenerator:
         # NOTE: RawConfigParser treats Jinja2 condition-wrapped options
         # (e.g. ``{% if x %}key = val{% endif %}``) as a single option whose
         # name includes the Jinja2 prefix.  Overriding such an option via
-        # extra_config would add a *new* option instead of replacing it.
-        # This is acceptable today because no extra_config key conflicts with
-        # a condition-wrapped option in the template.
+        # extra_config would add a *new* option instead of replacing it,
+        # leaving the rendered airflow.cfg with the option declared twice --
+        # which Airflow rejects outright with a DuplicateOptionError.
+        #
+        # No coordinator-owned extra_config key conflicts with a
+        # condition-wrapped option today. Provider-supplied configuration is
+        # NOT subject to that guarantee: it is attacker-influenced and can name
+        # any option, including `sql_alchemy_conn`. Layer 1 validation is what
+        # rejects such keys before they reach here; until it lands, a malicious
+        # or careless provider can wedge the rendered config this way.
         parser = configparser.RawConfigParser()
         parser.read_string(base_template)
 

@@ -118,6 +118,31 @@ def test_provider_config_sections_merged(context, state, workload_container):
         assert sensitive_data["provider__gcs__conn_id"] == "my-secret-conn-id"
 
 
+def test_provider_config_option_names_are_lowercased(context, state, workload_container):
+    """Provider option names are case-folded at ingest.
+
+    The rendered config is lowercased downstream regardless, so this is not
+    observable in the distributed template -- it matters for ``_provider_config``
+    itself, which is the dict Layer 1 validation performs its collision checks
+    against. If ingest preserved case, a provider could spell a reserved key as
+    ``Fernet_Key`` and slip past a case-sensitive check.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation("[core]\nMiXeD_Case_Option = value\n", secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+
+    assert provider_config["core"] == {"mixed_case_option": "value"}
+
+
 def test_provider_config_removed_when_relation_gone(context, state, workload_container):
     """Removing the provider relation drops its sections on the next reconcile."""
     secret = _sensitive_secret()
