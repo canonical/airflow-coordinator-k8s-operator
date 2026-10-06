@@ -610,6 +610,57 @@ def test_provider_sensitive_keys_outside_namespace_are_dropped(juju: jubilant.Ju
     assert "attacker-controlled-fernet-key" not in config
 
 
+def test_provider_malformed_config_does_not_stop_distribution(juju: jubilant.Juju):
+    """Malformed provider INI is dropped without wedging the coordinator.
+
+    Blocking here would stop `set_airflow_config` running at all, so a single
+    malformed character in another application's file would withhold every
+    configuration update from every core charm -- a cheaper denial of service
+    than any of the injection paths this suite covers. Only an integration test
+    can show distribution genuinely continues, since the failure is in what the
+    coordinator does *after* rendering.
+    """
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            # No section header: configparser.MissingSectionHeaderError.
+            "configuration": "key_without_section = value\n",
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and constants.INVALID_PROVIDER_CONFIG_MESSAGE
+            in status.apps["airflow-coordinator-k8s"].app_status.message
+        ),
+        error=jubilant.any_error,
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "[provider_demo]" not in c)
+
+    # The provider contribution is gone, but the coordinator's own configuration
+    # still reached every core charm.
+    assert "key_without_section" not in config
+    assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+
+    # Restore a usable configuration so the following tests start from a state
+    # where the provider contribution is actually present, and to show the
+    # notice clears without operator intervention.
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": "[provider_demo]\nconn_id = {{ provider__demo__token }}\n",
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    _wait_for_core_configs(juju, lambda c: "[provider_demo]" in c)
+
+
 def test_provider_configuration_dropped_when_secret_unreadable(juju: jubilant.Juju):
     """Revoking the secret drops provider config without blocking the coordinator.
 

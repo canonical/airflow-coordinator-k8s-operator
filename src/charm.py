@@ -461,13 +461,9 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         Returns:
             The decoded placeholder -> value map, or None when the backing secret
-            is not readable yet (not granted, or granted and later revoked), in
-            which case the caller must drop the provider configuration entirely
-            rather than render blank credentials.
-
-        Raises:
-            ExceptionWithStatusError: BlockedStatus if the secret is readable but
-                its payload is not the shape the interface promises.
+            cannot be read, or can be read but does not hold the shape the
+            interface promises. In both cases the caller must drop the provider
+            configuration entirely rather than render blank credentials.
         """
         try:
             sensitive_data = self._provider_config_requires.get_sensitive_data()
@@ -478,25 +474,28 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             # so it is a status message rather than a block -- but ModelError is
             # a broad base class, so log the real exception to keep an unrelated
             # model failure from silently masquerading as "secret not granted".
-            logger.warning(
-                "%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc
-            )
+            logger.warning("%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc)
             self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
             return None
         except (KeyError, ValueError, TypeError) as exc:
             # The secret is readable but malformed: missing the `sensitive-data`
-            # key (KeyError) or holding invalid JSON (ValueError). A buggy
-            # provider will not heal on its own, so surface it the way malformed
-            # INI is surfaced instead of crashing the hook.
-            raise ExceptionWithStatusError(
-                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
-            ) from exc
+            # key (KeyError) or holding invalid JSON (ValueError). That is the
+            # provider charm's bug, and it is where the block belongs -- the
+            # coordinator drops the contribution and reports it, so one broken
+            # application cannot stop configuration reaching the core charms.
+            logger.warning("%s: %r", constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, exc)
+            self._status_messages.append(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE)
+            return None
 
         if not isinstance(sensitive_data, dict):
             # Valid JSON, but an array or scalar rather than the promised object.
-            raise ExceptionWithStatusError(
-                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, ops.BlockedStatus
+            logger.warning(
+                "%s: expected an object, got %s",
+                constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE,
+                type(sensitive_data).__name__,
             )
+            self._status_messages.append(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE)
+            return None
         return sensitive_data
 
     @functools.cached_property
@@ -520,14 +519,10 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         * If the sensitive values cannot be read at all, the configuration is
           dropped wholesale rather than distributed with empty placeholders.
 
-        Per spec section 3.4, dropped configuration is logged and surfaced as a
-        status message but never blocks the unit. Malformed INI is the exception:
-        that is a broken provider, not a rejected value.
-
-        Raises:
-            ExceptionWithStatusError: BlockedStatus if the provider's template is
-                not valid INI, or its secret payload is malformed (broken data
-                from another application).
+        Per spec section 3.4, a provider contribution that cannot be used is
+        logged and surfaced as a status message, but never blocks the unit: the
+        coordinator keeps distributing its own configuration regardless of what
+        another application sends.
         """
         if not self._provider_config_relation:
             return _ProviderPayload()
@@ -535,6 +530,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         template = self._provider_config_requires.configurations()
         if not template:
             logger.warning(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
+            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
             return _ProviderPayload()
 
         raw_sensitive_data = self._read_provider_sensitive_data()
@@ -561,9 +557,17 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         try:
             parser.read_string(template)
         except configparser.Error as e:
-            raise ExceptionWithStatusError(
-                constants.INVALID_PROVIDER_CONFIG_MESSAGE, ops.BlockedStatus
-            ) from e
+            # Blocking here would withhold *all* configuration from the core
+            # charms, including coordinator-owned changes with nothing to do with
+            # the provider (fernet rotation, dag bundles, oauth), and would leave
+            # a newly-related core charm with none at all. That turns one
+            # malformed character in another application's file into a
+            # coordinator-wide outage, which is a cheaper denial of service than
+            # any of the injection paths this method defends against. Drop the
+            # contribution and report it instead.
+            logger.warning("%s: %r", constants.INVALID_PROVIDER_CONFIG_MESSAGE, e)
+            self._status_messages.append(constants.INVALID_PROVIDER_CONFIG_MESSAGE)
+            return _ProviderPayload()
 
         known_placeholders = set(sensitive_data)
         config: dict = {}
@@ -870,13 +874,23 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         """Return a single-line summary of the non-blocking notices, if any.
 
         `juju status` renders the message in a table column, so joining several
-        sentences makes the first one unreadable. Only the first notice is shown
-        and the rest are counted; every notice is logged at WARNING in full as
-        it is raised.
+        sentences makes the first one unreadable. Only the most severe notice is
+        shown and the rest are counted; every notice is logged at WARNING in full
+        as it is raised.
+
+        Notices are raised in the order reconciling happens to reach them, which
+        is not the order an operator cares about, so they are sorted by severity
+        before the first is picked.
         """
         if not self._status_messages:
             return ""
-        first, *rest = self._status_messages
+        severity = constants.PROVIDER_NOTICE_SEVERITY
+        # `sorted` is stable, so anything not ranked keeps its arrival order
+        # behind everything that is.
+        first, *rest = sorted(
+            self._status_messages,
+            key=lambda message: severity.index(message) if message in severity else len(severity),
+        )
         if not rest:
             return first
         return f"{first} (+{len(rest)} more, see logs)"

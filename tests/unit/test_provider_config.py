@@ -8,9 +8,10 @@
 #
 # Behaviour under test also covers the hardening applied after review:
 #   * provider config merged first, so coordinator-owned config wins;
-#   * malformed provider INI -> BlockedStatus;
+#   * unusable provider data (malformed INI, malformed secret, unreadable
+#     secret) -> provider config dropped and reported, coordinator stays Active
+#     and keeps distributing its own configuration;
 #   * relation_broken -> provider config removed entirely;
-#   * secret unreadable -> provider config omitted entirely, reported on status;
 #   * sensitive values confined to the `provider__` namespace;
 #   * Jinja2 syntax in provider content escaped unless it is a backed placeholder.
 #
@@ -235,9 +236,7 @@ def test_provider_config_secret_unreadable_omits_config(context, state, workload
         assert "provider__gcs__conn_id" not in sensitive_data
 
 
-def test_provider_sensitive_values_cannot_override_coordinator(
-    context, state, workload_container
-):
+def test_provider_sensitive_values_cannot_override_coordinator(context, state, workload_container):
     """Sensitive keys outside the `provider__` namespace are dropped.
 
     Without this filter a provider could ship ``core__fernet_key`` and replace the
@@ -343,10 +342,7 @@ def test_provider_config_jinja_is_escaped(context, state, workload_container):
 
         # A legitimate Airflow setting containing Jinja2 reaches airflow.cfg intact,
         # for Airflow itself to template at runtime.
-        assert (
-            rendered.get("logging", "log_filename_template")
-            == "dag_id={{ ti.dag_id }}/run.log"
-        )
+        assert rendered.get("logging", "log_filename_template") == "dag_id={{ ti.dag_id }}/run.log"
 
 
 def test_provider_config_rerendered_on_secret_changed(context, state, workload_container):
@@ -371,8 +367,14 @@ def test_provider_config_rerendered_on_secret_changed(context, state, workload_c
         assert sensitive_data["provider__gcs__conn_id"] == "rotated-conn-id"
 
 
-def test_provider_config_invalid_ini_blocks(context, state, workload_container):
-    """Malformed provider configuration (another app's data) -> BlockedStatus, not a crash."""
+def test_provider_config_invalid_ini_is_ignored(context, state, workload_container):
+    """Malformed provider INI is dropped and reported, without blocking the unit.
+
+    Blocking would stop ``set_airflow_config`` running at all, so one malformed
+    character in another application's file would withhold *every* configuration
+    update from *every* core charm -- including coordinator-owned ones. The
+    coordinator's own configuration must still be distributed.
+    """
     secret = _sensitive_secret()
     # No section header -> configparser.MissingSectionHeaderError.
     relation = _provider_relation("key_without_section = value\n", secret.id)
@@ -385,7 +387,18 @@ def test_provider_config_invalid_ini_blocks(context, state, workload_container):
 
     state_out = context.run(context.on.start(), state_in)
 
-    assert state_out.unit_status == ops.BlockedStatus(constants.INVALID_PROVIDER_CONFIG_MESSAGE)
+    assert state_out.unit_status == ops.ActiveStatus(constants.INVALID_PROVIDER_CONFIG_MESSAGE)
+
+    # Nothing from the provider got through...
+    assert not _provider_section_present(state_out)
+
+    # ...but the coordinator's own configuration still reached the core charms,
+    # which is the whole point of not blocking.
+    coordinator_relations = state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME)
+    assert coordinator_relations
+    for coordinator_relation in coordinator_relations:
+        config_template = coordinator_relation.local_app_data.get("config-template", "")
+        assert _parse(config_template).has_section("core")
 
 
 @pytest.mark.parametrize(
@@ -397,8 +410,8 @@ def test_provider_config_invalid_ini_blocks(context, state, workload_container):
         pytest.param({SENSITIVE_DATA_SECRET_KEY: '"a string"'}, id="json-string"),
     ],
 )
-def test_provider_config_malformed_secret_blocks(context, state, workload_container, content):
-    """A readable-but-malformed provider secret -> BlockedStatus, not a hook crash.
+def test_provider_config_malformed_secret_is_ignored(context, state, workload_container, content):
+    """A readable-but-malformed provider secret is dropped and reported, not fatal.
 
     The interface only promises the shape; a buggy provider can still store a
     secret with the wrong key, invalid JSON, or JSON that is not an object. Each
@@ -416,21 +429,20 @@ def test_provider_config_malformed_secret_blocks(context, state, workload_contai
 
     state_out = context.run(context.on.start(), state_in)
 
-    assert state_out.unit_status == ops.BlockedStatus(
+    assert state_out.unit_status == ops.ActiveStatus(
         constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE
     )
+    assert not _provider_section_present(state_out)
 
 
 def test_provider_config_recovers_when_malformed_secret_is_fixed(
     context, state, workload_container
 ):
-    """A blocked unit self-heals once the provider repairs its secret.
+    """A reporting unit clears its notice once the provider repairs its secret.
 
-    Blocking on a malformed secret is only safe if the block clears on its own
-    when the provider is fixed -- otherwise an operator would have to intervene
-    on every coordinator unit. The repaired secret arrives as a `secret-changed`
-    event with no relation churn, so that event alone must drive the unit back to
-    active *and* distribute the configuration that was withheld while blocked.
+    The repaired secret arrives as a `secret-changed` event with no relation
+    churn, so that event alone must clear the status *and* distribute the
+    configuration that was withheld while the secret was unusable.
     """
     secret = _sensitive_secret()
     relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
@@ -439,10 +451,54 @@ def test_provider_config_recovers_when_malformed_secret_is_fixed(
         state,
         relations=[*state.relations, relation],
         secrets=[*state.secrets, secret],
-        unit_status=ops.BlockedStatus(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE),
+        unit_status=ops.ActiveStatus(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE),
     )
 
     state_out = context.run(context.on.secret_changed(secret), state_in)
 
     assert state_out.unit_status == ops.ActiveStatus()
     assert _provider_section_present(state_out)
+
+
+def test_provider_config_not_published_yet_is_reported(context, state, workload_container):
+    """A related provider that has not published anything yet says so on status."""
+    secret = _sensitive_secret()
+    relation = _provider_relation("", secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus(constants.WAITING_FOR_PROVIDER_CONFIG_MESSAGE)
+    assert not _provider_section_present(state_out)
+
+
+def test_provider_notices_are_ordered_by_severity(context, state, workload_container):
+    """The most severe notice is the one shown, regardless of when it was raised.
+
+    Only the first notice fits in the `juju status` column. The dropped-keys
+    notice is raised before the configuration is even parsed, so without an
+    explicit ordering it would hide the far more consequential news that the
+    whole provider contribution was thrown away.
+    """
+    secret = _sensitive_secret(
+        {"provider__gcs__conn_id": "my-secret-conn-id", "core__fernet_key": "EVIL"}
+    )
+    # Out-of-namespace key (notice raised first) *and* malformed INI (raised second).
+    relation = _provider_relation("key_without_section = value\n", secret.id)
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus(
+        f"{constants.INVALID_PROVIDER_CONFIG_MESSAGE} (+1 more, see logs)"
+    )

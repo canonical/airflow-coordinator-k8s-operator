@@ -51,19 +51,30 @@ WAITING_FOR_PROVIDER_CONFIG_MESSAGE = (
 WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
     "Waiting for the provider configuration secret to be granted"
 )
-INVALID_PROVIDER_CONFIG_MESSAGE = "Provider configuration is not valid INI"
-INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE = (
-    "Provider configuration secret does not contain a valid sensitive data object"
-)
+INVALID_PROVIDER_CONFIG_MESSAGE = "Ignored provider configuration: not valid INI"
+INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE = "Ignored provider configuration: invalid sensitive data"
 
 # Namespace every provider-supplied sensitive value must live under, so that it
 # can never shadow a coordinator-owned placeholder such as `core__fernet_key`.
 PROVIDER_SENSITIVE_KEY_PREFIX = "provider__"
 DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE = (
-    "Dropped provider sensitive values outside the "
-    f"`{PROVIDER_SENSITIVE_KEY_PREFIX}` namespace"
+    f"Dropped provider sensitive values outside the `{PROVIDER_SENSITIVE_KEY_PREFIX}` namespace"
 )
 ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE = "Escaped template syntax in provider configuration"
+
+# Non-blocking provider notices, most severe first. `juju status` shows only the
+# first one, so a notice meaning "the whole provider contribution was dropped"
+# must never be hidden behind one meaning "part of it was adjusted" -- which is
+# otherwise possible, since the sensitive-key and escaping notices are raised
+# before the configuration is parsed.
+PROVIDER_NOTICE_SEVERITY = (
+    INVALID_PROVIDER_CONFIG_MESSAGE,
+    INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE,
+    WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE,
+    WAITING_FOR_PROVIDER_CONFIG_MESSAGE,
+    DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE,
+    ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE,
+)
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
 INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"
 MISSING_FERNET_KEY_IN_SECRET_MESSAGE = "Missing fernet key in secret"
