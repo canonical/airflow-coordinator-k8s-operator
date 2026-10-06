@@ -35,7 +35,7 @@ parts:
     build-packages:
       # Required so uv can clone the git-installed
       # airflow-provider-configurator-charmlib during pack. Remove once the
-      # charmlib is consumed from PyPI (see enhancement issue).
+      # charmlib is consumed from PyPI (#88).
       - git
   files:
     plugin: dump

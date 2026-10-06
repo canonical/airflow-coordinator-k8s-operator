@@ -14,7 +14,8 @@ dependencies = [
     "ops>=3,<4",
     # Pinned to the same ref as the coordinator: the point of these tests is to
     # exercise both sides of one interface version, so a drift between the two
-    # would silently weaken them.
+    # would silently weaken them. Swap for a PyPI version range alongside the
+    # coordinator's (#88).
     "airflow-provider-configurator-charmlib @ git+https://github.com/canonical/airflow-provider-configurator.git@track/1.0#subdirectory=lib",
 ]
 
