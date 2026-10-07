@@ -456,6 +456,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return relation
         return None
 
+    def _report_unreadable_provider_secret(self, exc: Exception) -> None:
+        """Report an unreadable provider secret as a notice, dropping its config.
+
+        Transient and operator-resolvable, so a status message rather than a block.
+        """
+        logger.warning("%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc)
+        self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
+        return None
+
     def _read_provider_sensitive_data(self) -> dict | None:
         """Return the provider's sensitive values, or None if they are unavailable.
 
@@ -464,25 +473,23 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             cannot be read, or can be read but does not hold the shape the
             interface promises. In both cases the caller must drop the provider
             configuration entirely rather than render blank credentials.
+
+        Raises:
+            ops.ModelError: if reading the secret failed for any reason other
+                than the grant having been withdrawn.
         """
         try:
             sensitive_data = self._provider_config_requires.get_sensitive_data()
-        except (provider_config.SecretNotReadyError, ops.ModelError) as exc:
-            # Not granted yet, or granted and then revoked (which surfaces as a
-            # bare ModelError rather than SecretNotFoundError, so it cannot be
-            # caught more narrowly). This is transient and operator-resolvable,
-            # so it is a status message rather than a block -- but ModelError is
-            # a broad base class, so log the real exception to keep an unrelated
-            # model failure from silently masquerading as "secret not granted".
-            logger.warning("%s: %r", constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE, exc)
-            self._status_messages.append(constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE)
-            return None
+        except provider_config.SecretNotReadyError as exc:
+            # Shared but not granted yet.
+            return self._report_unreadable_provider_secret(exc)
+        except ops.ModelError as exc:
+            # Revoked grant. Anything else is a real model failure: keep it raising.
+            if constants.SECRET_PERMISSION_DENIED_MARKER not in str(exc).lower():
+                raise
+            return self._report_unreadable_provider_secret(exc)
         except (KeyError, ValueError, TypeError) as exc:
-            # The secret is readable but malformed: missing the `sensitive-data`
-            # key (KeyError) or holding invalid JSON (ValueError). That is the
-            # provider charm's bug, and it is where the block belongs -- the
-            # coordinator drops the contribution and reports it, so one broken
-            # application cannot stop configuration reaching the core charms.
+            # Readable but malformed: missing `sensitive-data` key, or invalid JSON.
             logger.warning("%s: %r", constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE, exc)
             self._status_messages.append(constants.INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE)
             return None
@@ -557,14 +564,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         try:
             parser.read_string(template)
         except configparser.Error as e:
-            # Blocking here would withhold *all* configuration from the core
-            # charms, including coordinator-owned changes with nothing to do with
-            # the provider (fernet rotation, dag bundles, oauth), and would leave
-            # a newly-related core charm with none at all. That turns one
-            # malformed character in another application's file into a
-            # coordinator-wide outage, which is a cheaper denial of service than
-            # any of the injection paths this method defends against. Drop the
-            # contribution and report it instead.
             logger.warning("%s: %r", constants.INVALID_PROVIDER_CONFIG_MESSAGE, e)
             self._status_messages.append(constants.INVALID_PROVIDER_CONFIG_MESSAGE)
             return _ProviderPayload()

@@ -469,12 +469,14 @@ resolved = {{ provider__demo__token }}
 PROVIDER_TOKEN = "s3cr3t-provider-token"
 
 
+def _core_charm_config(juju: jubilant.Juju, component: str) -> str:
+    """Return the airflow.cfg one mocked core charm currently holds."""
+    return juju.run(f"airflow-{component}-mock/0", "get-airflow-config").results["airflow-config"]
+
+
 def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
     """Return the distinct airflow.cfg contents across all mocked core charms."""
-    return {
-        juju.run(f"airflow-{component}-mock/0", "get-airflow-config").results["airflow-config"]
-        for component in AIRFLOW_COMPONENTS
-    }
+    return {_core_charm_config(juju, component) for component in AIRFLOW_COMPONENTS}
 
 
 def _wait_for_core_configs(
@@ -490,7 +492,10 @@ def _wait_for_core_configs(
     identified by its content instead.
 
     Requiring a single distinct config across all four core charms also makes this
-    assert propagation rather than just the coordinator's local view.
+    assert propagation rather than just the coordinator's local view. Polling all
+    four every pass is wasteful though -- an action costs several times what a
+    status call does -- so each pass probes a single charm and the agreement check
+    only runs once that probe looks settled.
 
     A charm that chokes on the published configuration lands in ``error`` and stays
     there, so ``all_active`` can never come true and the wait would otherwise burn
@@ -501,10 +506,21 @@ def _wait_for_core_configs(
     configs: set[str] = set()
 
     while True:
-        juju.wait(jubilant.all_active, error=jubilant.any_error)
-        configs = _core_charm_configs(juju)
-        if len(configs) == 1 and predicate(next(iter(configs))):
-            return next(iter(configs))
+        # Without an explicit timeout `juju.wait` uses its own (far longer)
+        # default, so a model that never reaches `all_active` would overrun this
+        # helper's advertised deadline by minutes.
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            juju.wait(jubilant.all_active, error=jubilant.any_error, timeout=remaining)
+
+            # Cheap single-charm probe first: if the coordinator has not even
+            # rendered the expected config yet, there is nothing for the other
+            # three to have converged on.
+            if predicate(_core_charm_config(juju, AIRFLOW_COMPONENTS[0])):
+                configs = _core_charm_configs(juju)
+                if len(configs) == 1 and predicate(next(iter(configs))):
+                    return next(iter(configs))
+
         if time.monotonic() > deadline:
             raise AssertionError(
                 f"Core charms did not converge on the expected config within {timeout}s "

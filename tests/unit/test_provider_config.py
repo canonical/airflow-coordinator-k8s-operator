@@ -22,6 +22,7 @@ import configparser
 import dataclasses
 import json
 
+import airflow_provider_configurator as provider_config
 import jinja2
 import ops
 import ops.testing
@@ -234,6 +235,62 @@ def test_provider_config_secret_unreadable_omits_config(context, state, workload
     ):
         sensitive_data = _distributed_sensitive_data(state_out, coordinator_relation)
         assert "provider__gcs__conn_id" not in sensitive_data
+
+
+@pytest.mark.parametrize(
+    ("error", "expect_reported"),
+    [
+        pytest.param(
+            ops.ModelError("ERROR permission denied\n"),
+            True,
+            id="grant-revoked",
+        ),
+        pytest.param(
+            ops.ModelError("ERROR connection refused\n"),
+            False,
+            id="unrelated-model-failure",
+        ),
+    ],
+)
+def test_provider_secret_model_errors(
+    context, state, workload_container, monkeypatch, error, expect_reported
+):
+    """Only a withdrawn grant is treated as "waiting for the secret".
+
+    A revoked grant has no dedicated ops exception -- it arrives as a bare
+    ModelError -- so it has to be recognised by Juju's stderr. That match must be
+    narrow: swallowing every ModelError would report an unrelated model failure
+    as a missing grant and silently drop the provider's configuration for it.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+
+    monkeypatch.setattr(
+        provider_config.AirflowProviderConfiguratorRequires,
+        "get_sensitive_data",
+        lambda self: (_ for _ in ()).throw(error),
+    )
+
+    state_in = dataclasses.replace(
+        state,
+        relations=[*state.relations, relation],
+        secrets=[*state.secrets, secret],
+    )
+
+    if not expect_reported:
+        # Propagates, so the hook fails loudly instead of the failure being
+        # mistaken for a provider that simply has not granted its secret yet.
+        with pytest.raises(Exception) as exc_info:
+            context.run(context.on.start(), state_in)
+        assert "connection refused" in str(exc_info.value)
+        return
+
+    state_out = context.run(context.on.start(), state_in)
+
+    assert state_out.unit_status == ops.ActiveStatus(
+        constants.WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE
+    )
+    assert not _provider_section_present(state_out)
 
 
 def test_provider_sensitive_values_cannot_override_coordinator(context, state, workload_container):

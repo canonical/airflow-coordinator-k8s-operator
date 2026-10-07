@@ -54,6 +54,9 @@ WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
 INVALID_PROVIDER_CONFIG_MESSAGE = "Ignored provider configuration: not valid INI"
 INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE = "Ignored provider configuration: invalid sensitive data"
 
+# Juju's stderr for a withdrawn secret grant; ops has no typed exception for it.
+SECRET_PERMISSION_DENIED_MARKER = "permission denied"
+
 # Namespace every provider-supplied sensitive value must live under, so that it
 # can never shadow a coordinator-owned placeholder such as `core__fernet_key`.
 PROVIDER_SENSITIVE_KEY_PREFIX = "provider__"
