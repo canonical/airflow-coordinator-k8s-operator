@@ -9,6 +9,7 @@ S3_ENDPOINT_NAME = "s3"
 GIT_ENDPOINT_NAME = "git"
 OAUTH_ENDPOINT_NAME = "oauth"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
+AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME = "airflow-provider-configuration"
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -43,6 +44,39 @@ AIRFLOW_KEYS_SECRET_ERROR_MESSAGE = "Issue retrieving secret hosting airflow key
 AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE = "Issue adding secret for airflow keys"
 WAITING_FOR_KUBERNETES_EXECUTOR_CONFIG_MESSAGE = (
     "Waiting for configuration from the kubernetes executor charm"
+)
+WAITING_FOR_PROVIDER_CONFIG_MESSAGE = (
+    "Waiting for configuration from the provider configurator charm"
+)
+WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE = (
+    "Waiting for the provider configuration secret to be granted"
+)
+INVALID_PROVIDER_CONFIG_MESSAGE = "Ignored provider configuration: not valid INI"
+INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE = "Ignored provider configuration: invalid sensitive data"
+
+# Juju's stderr for a withdrawn secret grant; ops has no typed exception for it.
+SECRET_PERMISSION_DENIED_MARKER = "permission denied"
+
+# Namespace every provider-supplied sensitive value must live under, so that it
+# can never shadow a coordinator-owned placeholder such as `core__fernet_key`.
+PROVIDER_SENSITIVE_KEY_PREFIX = "provider__"
+DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE = (
+    f"Dropped provider sensitive values outside the `{PROVIDER_SENSITIVE_KEY_PREFIX}` namespace"
+)
+ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE = "Escaped template syntax in provider configuration"
+
+# Non-blocking provider notices, most severe first. `juju status` shows only the
+# first one, so a notice meaning "the whole provider contribution was dropped"
+# must never be hidden behind one meaning "part of it was adjusted" -- which is
+# otherwise possible, since the sensitive-key and escaping notices are raised
+# before the configuration is parsed.
+PROVIDER_NOTICE_SEVERITY = (
+    INVALID_PROVIDER_CONFIG_MESSAGE,
+    INVALID_PROVIDER_SENSITIVE_DATA_MESSAGE,
+    WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE,
+    WAITING_FOR_PROVIDER_CONFIG_MESSAGE,
+    DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE,
+    ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE,
 )
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"
 INVALID_FERNET_KEY_SECRET_MESSAGE = "Fernet key secret not valid"

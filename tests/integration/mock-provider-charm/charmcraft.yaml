@@ -1,0 +1,67 @@
+# This file configures Charmcraft.
+# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: mock-provider-charm
+title: Mock Airflow Provider Configurator charm
+summary: A mock provider configurator to help test the Airflow Coordinator charm.
+description: |
+  A mock airflow-provider-configurator charm used to drive the requirer side of
+  the airflow_provider_configuration relation under test.
+
+  Unlike the real configurator, this charm performs no validation of its own: it
+  publishes whatever template and sensitive data an action hands it. That is
+  deliberate. The coordinator must not rely on the provider having sanitised
+  anything, so the tests need a provider that can publish hostile input.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+    build-packages:
+      # Required so uv can clone the git-installed
+      # airflow-provider-configurator-charmlib during pack, matching the
+      # coordinator's own charmcraft.yaml.
+      - git
+
+provides:
+  airflow-provider-configuration:
+    interface: airflow_provider_configuration
+
+actions:
+  set-configuration:
+    description: |
+      Publish a provider configuration template plus its sensitive data to the
+      related coordinator. Mirrors what the real configurator does once it has
+      validated an operator-supplied config.
+    params:
+      configuration:
+        description: The Jinja2 configuration template to publish, verbatim.
+        type: string
+      sensitive-data:
+        description: >-
+          JSON object mapping placeholder name to sensitive value, e.g.
+          '{"provider__gcs__password": "s3cr3t"}'. Defaults to an empty object.
+        type: string
+        default: "{}"
+    required:
+      - configuration
+
+  clear-configuration:
+    description: |
+      Withdraw any published configuration and remove the sensitive data secret,
+      as the real configurator does when its config becomes empty.
+
+  revoke-secret:
+    description: |
+      Revoke the sensitive data secret from the related coordinator while leaving
+      the databag untouched.
+
+      This has no equivalent in the real configurator; it exists to reproduce the
+      state where the coordinator still sees a secret URI it can no longer read,
+      which is the only way to exercise the coordinator's bare-ModelError branch.
