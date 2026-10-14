@@ -11,6 +11,8 @@ import pathlib
 import typing
 
 import charms.git_integrator.v0.git as git
+import jinja2
+import mergedeep
 import ops
 
 import connection_manager
@@ -265,3 +267,59 @@ class AirflowConfigGenerator:
             )
             for rid, info in self._charm.s3_relation_connections.items()
         }
+
+    @property
+    def _owned_extra_config(self) -> dict:
+        """The coordinator-owned extra config, excluding the provider contribution.
+
+        Must stay in sync with the extra sources merged in the charm's
+        ``_airflow_config_template`` (everything there except ``_provider_config``):
+        this is the set Layer 1 treats as coordinator-owned.
+        """
+        return mergedeep.merge(
+            {},
+            self.api_server_uri_config,
+            self.dag_bundle_config,
+            (self._charm._kubernetes_executor_config or {}),
+            self.coordinator_charm_core_config,
+            self.auth_manager_config,
+        )
+
+    @property
+    def owned_keys(self) -> frozenset[str]:
+        """Return the lowercased ``section.option`` keys the coordinator itself sets.
+
+        Layer 1 validation (spec 3.2.1) drops any provider-supplied key that
+        collides with one of these, so a provider can never override what the
+        coordinator renders -- including the base-template keys that extras layer
+        over, which merge order alone does not protect.
+
+        The base template is rendered with ``render_sensitive_data=True`` so that
+        secret-valued options wrapped in ``{% if render_sensitive_data %}`` (e.g.
+        ``database.sql_alchemy_conn``) are included; only the keys matter, so the
+        placeholders resolve to empty values. The extra config is already in
+        ``{section: {option: value}}`` shape, so its keys are read directly
+        without rendering -- which also keeps relation-derived JSON (the DAG
+        bundle list) from being fed through Jinja2.
+
+        Keys are lowercased, section and option both, matching how Airflow treats
+        airflow.cfg names, so the collision check is case-insensitive.
+        """
+        rendered_base = (
+            jinja2.Environment(autoescape=False)
+            .from_string(self.config_template)
+            .render(render_sensitive_data=True)
+        )
+        parser = configparser.RawConfigParser()
+        parser.read_string(rendered_base)
+        keys = {
+            f"{section}.{option}".lower()
+            for section in parser.sections()
+            for option in parser.options(section)
+        }
+        keys |= {
+            f"{section}.{option}".lower()
+            for section, options in self._owned_extra_config.items()
+            for option in options
+        }
+        return frozenset(keys)

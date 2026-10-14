@@ -591,7 +591,56 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             logger.warning(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
             self._status_messages.append(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
 
+        config, sensitive_data = self._apply_layer_1(config, sensitive_data)
+
         return _ProviderPayload(config=config, sensitive_data=sensitive_data)
+
+    def _apply_layer_1(self, config: dict, sensitive_data: dict) -> tuple[dict, dict]:
+        """Drop provider keys that collide with coordinator-owned config (Layer 1).
+
+        Spec 3.2.1: any provider ``section.option`` that the coordinator itself
+        sets is dropped, so a provider can never override coordinator-owned
+        configuration -- including the base-template keys (``core.fernet_key``,
+        ``database.sql_alchemy_conn``, ...) that merge order alone leaves exposed.
+        The owned-key set is computed from the coordinator's rendered config, so
+        it moves with the relations and charm config and is current each reconcile.
+
+        Non-blocking (spec 3.4): each collision is logged at WARNING naming the
+        key and the layer, and a single status notice is raised; the unit stays
+        Active. Sensitive values whose placeholder is no longer referenced by a
+        surviving option are dropped too, so config and sensitive data stay
+        consistent.
+        """
+        owned_keys = self._config_generator.owned_keys
+
+        collisions: list[str] = []
+        filtered_config: dict = {}
+        for section, options in config.items():
+            kept = {}
+            for option, value in options.items():
+                if f"{section}.{option}".lower() in owned_keys:
+                    collisions.append(f"{section}.{option}")
+                else:
+                    kept[option] = value
+            if kept:
+                filtered_config[section] = kept
+
+        if collisions:
+            for key in sorted(collisions):
+                logger.warning(constants.LAYER_1_COLLISION_LOG, key)
+            self._status_messages.append(constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE)
+
+        # Keep the sensitive map consistent with the filtered config: retain only
+        # placeholders still referenced by a surviving option.
+        referenced = {
+            match.group(1)
+            for options in filtered_config.values()
+            for value in options.values()
+            for match in _PROVIDER_PLACEHOLDER.finditer(value)
+        }
+        filtered_sensitive = {k: v for k, v in sensitive_data.items() if k in referenced}
+
+        return filtered_config, filtered_sensitive
 
     @property
     def _provider_sensitive_data(self) -> dict:
@@ -607,8 +656,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         this dict see the same keys that reach the rendered airflow.cfg.
 
         Provider-supplied keys that collide with coordinator-owned configuration
-        are not filtered here: that is Layer 1 validation, which computes the
-        owned-key set from the rendered config and lands in a follow-up change.
+        have already been dropped by Layer 1 validation (see ``_apply_layer_1``),
+        which compares against the owned-key set computed from the rendered config.
         """
         return self._provider_payload.config
 
