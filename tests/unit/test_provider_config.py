@@ -670,3 +670,33 @@ def test_layer1_drops_orphaned_sensitive_value_on_collision(context, state, work
 
     assert "api" not in provider_config
     assert provider_sensitive == {}
+
+
+def test_layer1_retains_non_colliding_options_in_a_colliding_section(
+    context, state, workload_container
+):
+    """Within one section, only the colliding option is dropped; its siblings stay.
+
+    The coordinator owns ``core.fernet_key`` but not ``core.hostname_callable``,
+    so a provider ``[core]`` carrying both keeps the section -- reduced to just
+    its own option -- rather than losing the section wholesale.
+
+    The surviving option is deliberately one no layer claims: ``core.dags_folder``
+    would read as a valid choice today but is the Layer 2 denylist entry (spec
+    3.2.2), so a test asserting it survives would invert the moment Layer 2 lands.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation(
+        "[core]\nfernet_key = pwned\nhostname_callable = my.module.get_hostname\n", secret.id
+    )
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    assert provider_config.get("core") == {"hostname_callable": "my.module.get_hostname"}
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
