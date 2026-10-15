@@ -677,17 +677,13 @@ def test_layer1_retains_non_colliding_options_in_a_colliding_section(
 ):
     """Within one section, only the colliding option is dropped; its siblings stay.
 
-    The coordinator owns ``core.fernet_key`` but not ``core.hostname_callable``,
-    so a provider ``[core]`` carrying both keeps the section -- reduced to just
-    its own option -- rather than losing the section wholesale.
-
-    The surviving option is deliberately one no layer claims: ``core.dags_folder``
-    would read as a valid choice today but is the Layer 2 denylist entry (spec
-    3.2.2), so a test asserting it survives would invert the moment Layer 2 lands.
+    The coordinator owns ``core.fernet_key`` but not ``core.dags_folder``, so a
+    provider ``[core]`` carrying both keeps the section -- reduced to just its own
+    option -- rather than losing the section wholesale.
     """
     secret = _sensitive_secret()
     relation = _provider_relation(
-        "[core]\nfernet_key = pwned\nhostname_callable = my.module.get_hostname\n", secret.id
+        "[core]\nfernet_key = pwned\ndags_folder = /opt/airflow/provider_dags\n", secret.id
     )
     state_in = dataclasses.replace(
         state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
@@ -698,5 +694,32 @@ def test_layer1_retains_non_colliding_options_in_a_colliding_section(
         provider_config = manager.charm._provider_config
         status_messages = list(manager.charm._status_messages)
 
-    assert provider_config.get("core") == {"hostname_callable": "my.module.get_hostname"}
+    assert provider_config.get("core") == {"dags_folder": "/opt/airflow/provider_dags"}
     assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
+
+
+def test_layer1_owned_keys_match_the_base_template(context, state, workload_container):
+    """Pin the owned set the base template contributes, with extras left empty.
+
+    The render supplies ``render_sensitive_data=True`` and nothing else, so any
+    other conditional added to the template evaluates falsey and silently drops
+    its keys from the owned set, reopening them to provider override.
+    """
+    with context(context.on.start(), state) as manager:
+        owned = manager.charm._config_generator.owned_keys({})
+
+    assert owned == frozenset(
+        {
+            "core.executor",
+            "core.load_examples",
+            "core.fernet_key",
+            "core.dagbag_import_error_tracebacks",
+            "core.check_migrations",
+            # Only present because the render passes render_sensitive_data=True.
+            "database.sql_alchemy_conn",
+            "api.secret_key",
+            "api.enable_swagger_ui",
+            "api_auth.jwt_secret",
+            "scheduler.enable_healthcheck",
+        }
+    )

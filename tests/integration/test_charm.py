@@ -677,6 +677,68 @@ def test_provider_malformed_config_does_not_stop_distribution(juju: jubilant.Juj
     _wait_for_core_configs(juju, lambda c: "[provider_demo]" in c)
 
 
+def test_provider_colliding_keys_are_dropped(juju: jubilant.Juju):
+    """Layer 1: keys the coordinator renders are dropped, their siblings are not.
+
+    ``[scheduler]`` rather than ``[core]`` because the configurator's Layer 2
+    denylist strips ``[core]``, ``[database]`` and ``[api]`` upstream, leaving
+    Layer 1 as the only guard on the sections Layer 2 allows through.
+    """
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": (
+                "[provider_demo]\nconn_id = {{ provider__demo__token }}\n"
+                # enable_healthcheck is rendered by the coordinator; the other is not.
+                "[scheduler]\nenable_healthcheck = False\nmax_tis_per_query = 1\n"
+            ),
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE
+            in status.apps["airflow-coordinator-k8s"].app_status.message
+        ),
+        error=jubilant.any_error,
+    )
+
+    config = _wait_for_core_configs(juju, lambda c: "max_tis_per_query" in c)
+
+    # The coordinator's value reaches airflow.cfg; the provider's is gone.
+    assert "enable_healthcheck = True" in config
+    assert "enable_healthcheck = False" not in config
+
+    # An option in the same section that the coordinator does not render is
+    # unaffected -- only the collision is dropped, not the section.
+    assert "max_tis_per_query = 1" in config
+
+    # Restore the plain provider contribution, which also shows the notice
+    # clearing without operator intervention (spec 3.4: drops are non-blocking).
+    juju.run(
+        f"{PROVIDER_APP}/0",
+        "set-configuration",
+        {
+            "configuration": "[provider_demo]\nconn_id = {{ provider__demo__token }}\n",
+            "sensitive-data": json.dumps({"provider__demo__token": PROVIDER_TOKEN}),
+        },
+    )
+
+    juju.wait(
+        lambda status: (
+            jubilant.all_active(status)
+            and constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE
+            not in status.apps["airflow-coordinator-k8s"].app_status.message
+        ),
+        error=jubilant.any_error,
+    )
+
+    _wait_for_core_configs(juju, lambda c: "max_tis_per_query" not in c)
+
+
 def test_provider_configuration_dropped_when_secret_unreadable(juju: jubilant.Juju):
     """Revoking the secret drops provider config without blocking the coordinator.
 
