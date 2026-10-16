@@ -591,7 +591,64 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             logger.warning(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
             self._status_messages.append(constants.ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE)
 
+        config, sensitive_data = self._apply_layer_1(config, sensitive_data)
+
         return _ProviderPayload(config=config, sensitive_data=sensitive_data)
+
+    def _apply_layer_1(self, config: dict, sensitive_data: dict) -> tuple[dict, dict]:
+        """Drop provider keys that collide with coordinator-owned config (Layer 1).
+
+        Spec 3.2.1: any provider ``section.option`` that the coordinator itself
+        sets is dropped, so a provider can never override coordinator-owned
+        configuration -- including the base-template keys (``core.fernet_key``,
+        ``database.sql_alchemy_conn``, ...) that merge order alone leaves exposed.
+        The owned-key set is computed from the coordinator's rendered config, so
+        it moves with the relations and charm config and is current each reconcile.
+
+        Non-blocking (spec 3.4): each collision is logged at WARNING naming the
+        key and the layer, and a single status notice is raised; the unit stays
+        Active. Sensitive values whose placeholder is no longer referenced by a
+        surviving option are dropped too, so config and sensitive data stay
+        consistent.
+
+        The provider side of the comparison is the sanitised, option-lowercased
+        ``_provider_config`` -- the keys that actually reach airflow.cfg -- rather
+        than the interface's ``configuration_keys()`` the spec (4.2/5) names.
+        That re-parses the raw databag with ``optionxform=str``, so it is
+        case-sensitive and would let ``[CORE] FERNET_KEY`` slip past; checking the
+        keys we are about to merge is a strict superset of that check and matches
+        what we drop, so the two can never disagree.
+        """
+        owned_keys = self._config_generator.owned_keys(self._owned_extra_config)
+
+        collisions: list[str] = []
+        filtered_config: dict = {}
+        for section, options in config.items():
+            kept = {}
+            for option, value in options.items():
+                if f"{section}.{option}".lower() in owned_keys:
+                    collisions.append(f"{section}.{option}")
+                else:
+                    kept[option] = value
+            if kept:
+                filtered_config[section] = kept
+
+        if collisions:
+            for key in sorted(collisions):
+                logger.warning(constants.LAYER_1_COLLISION_LOG, key)
+            self._status_messages.append(constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE)
+
+        # Keep the sensitive map consistent with the filtered config: retain only
+        # placeholders still referenced by a surviving option.
+        referenced = {
+            match.group(1)
+            for options in filtered_config.values()
+            for value in options.values()
+            for match in _PROVIDER_PLACEHOLDER.finditer(value)
+        }
+        filtered_sensitive = {k: v for k, v in sensitive_data.items() if k in referenced}
+
+        return filtered_config, filtered_sensitive
 
     @property
     def _provider_sensitive_data(self) -> dict:
@@ -607,8 +664,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         this dict see the same keys that reach the rendered airflow.cfg.
 
         Provider-supplied keys that collide with coordinator-owned configuration
-        are not filtered here: that is Layer 1 validation, which computes the
-        owned-key set from the rendered config and lands in a follow-up change.
+        have already been dropped by Layer 1 validation (see ``_apply_layer_1``),
+        which compares against the owned-key set computed from the rendered config.
         """
         return self._provider_payload.config
 
@@ -622,24 +679,42 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
+    @functools.cached_property
+    def _owned_extra_config(self) -> dict:
+        """The coordinator's own config contribution on top of the base template.
+
+        Single source of truth for what the coordinator sets beyond the base
+        template: ``_airflow_config_template`` layers it over the provider
+        contribution, and Layer 1 (``_apply_layer_1``) derives the owned-key set
+        from it. Keeping one definition means a new coordinator source cannot be
+        added to the rendered config without also becoming off-limits to
+        providers -- there is no second list to forget to update.
+
+        Cached because both consumers run per reconcile and the charm object is
+        rebuilt per event: this walks the S3 and git relations and serialises the
+        DAG bundle list, so it is recomputed at most once per event.
+        """
+        return mergedeep.merge(
+            {},
+            self._config_generator.api_server_uri_config,
+            self._config_generator.dag_bundle_config,
+            (self._kubernetes_executor_config or {}),
+            self._config_generator.coordinator_charm_core_config,
+            self._config_generator.auth_manager_config,
+        )
+
     @property
     def _airflow_config_template(self) -> str:
         """Airflow config template merged with additional runtime compiled configs."""
-        # Provider config is merged FIRST so every coordinator-managed extra
-        # (api server uri, dag bundles, k8s executor, core, auth) wins over it
-        # under mergedeep's last-wins semantics. Note this does not protect keys
-        # that only exist in the base template, since extras always layer over
-        # it; that is handled by Layer 1 validation in a follow-up change.
+        # Provider config is merged FIRST so every coordinator-managed extra wins
+        # over it under mergedeep's last-wins semantics. On its own this would not
+        # protect keys that exist only in the base template (extras always layer
+        # over it, provider config never reaches them); Layer 1 validation closes
+        # that gap by dropping colliding provider keys before this merge, so by
+        # the time `_provider_config` lands here it can no longer shadow anything
+        # the coordinator owns.
         return self._config_generator.config_template_with_extra_config(
-            **mergedeep.merge(
-                {},
-                self._provider_config,
-                self._config_generator.api_server_uri_config,
-                self._config_generator.dag_bundle_config,
-                (self._kubernetes_executor_config or {}),
-                self._config_generator.coordinator_charm_core_config,
-                self._config_generator.auth_manager_config,
-            ),
+            **mergedeep.merge({}, self._provider_config, self._owned_extra_config),
         )
 
     def _validate_configs(self):

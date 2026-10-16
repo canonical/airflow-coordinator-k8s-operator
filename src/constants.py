@@ -64,6 +64,15 @@ DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE = (
     f"Dropped provider sensitive values outside the `{PROVIDER_SENSITIVE_KEY_PREFIX}` namespace"
 )
 ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE = "Escaped template syntax in provider configuration"
+# Layer 1 collision (spec 3.2.1 / 3.4): a provider key the coordinator itself
+# sets is dropped and reported, non-blocking. The log names each dropped key; the
+# status message is a single summary (the log carries the full list).
+LAYER_1_COLLISION_LOG = (
+    "Layer 1 collision: dropped provider configuration key '%s' set by the coordinator"
+)
+DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE = (
+    "Dropped provider configuration that collides with coordinator configuration"
+)
 
 # Non-blocking provider notices, most severe first. `juju status` shows only the
 # first one, so a notice meaning "the whole provider contribution was dropped"
@@ -76,6 +85,7 @@ PROVIDER_NOTICE_SEVERITY = (
     WAITING_FOR_PROVIDER_CONFIG_SECRET_MESSAGE,
     WAITING_FOR_PROVIDER_CONFIG_MESSAGE,
     DROPPED_PROVIDER_SENSITIVE_KEYS_MESSAGE,
+    DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE,
     ESCAPED_PROVIDER_TEMPLATE_SYNTAX_MESSAGE,
 )
 MISSING_FERNET_KEY_SECRET_CONFIG_MESSAGE = "Waiting for fernet key secret configuration"

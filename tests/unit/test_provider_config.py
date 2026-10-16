@@ -16,7 +16,7 @@
 #   * Jinja2 syntax in provider content escaped unless it is a backed placeholder.
 #
 # Collision handling between provider keys and coordinator-owned keys is Layer 1
-# validation and is covered by a follow-up change.
+# validation; the Layer 1 tests are at the end of this file.
 
 import configparser
 import dataclasses
@@ -558,4 +558,168 @@ def test_provider_notices_are_ordered_by_severity(context, state, workload_conta
 
     assert state_out.unit_status == ops.ActiveStatus(
         f"{constants.INVALID_PROVIDER_CONFIG_MESSAGE} (+1 more, see logs)"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Layer 1 validation: collisions with coordinator-owned configuration (spec 3.2.1).
+# --------------------------------------------------------------------------- #
+
+
+def test_layer1_drops_key_colliding_with_coordinator(context, state, workload_container):
+    """A provider key the coordinator itself sets is dropped; its own sections survive."""
+    secret = _sensitive_secret()
+    # core.fernet_key is coordinator-owned; gcs.project is the provider's own.
+    relation = _provider_relation(
+        "[core]\nfernet_key = pwned\n[gcs]\nproject = my-project\n", secret.id
+    )
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        state_out = manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    # The colliding key is gone (its section emptied and removed); the provider's
+    # own section is untouched.
+    assert "core" not in provider_config
+    assert provider_config.get("gcs") == {"project": "my-project"}
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
+
+    # The coordinator's own value reaches airflow.cfg, not the provider's.
+    for template in _distributed_config_templates(state_out):
+        assert _parse(template).get("core", "fernet_key") == "{{ core__fernet_key }}"
+
+
+def test_layer1_drops_collision_with_base_template_secret_key(context, state, workload_container):
+    """A collision on a key wrapped in {% if render_sensitive_data %} is caught.
+
+    ``database.sql_alchemy_conn`` only appears once the base template is rendered,
+    so this exercises owned_keys' render step -- merge order alone would not
+    protect it.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation("[database]\nsql_alchemy_conn = evil\n", secret.id)
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    assert "database" not in provider_config
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
+
+
+def test_layer1_collision_is_case_insensitive(context, state, workload_container):
+    """`[CORE] FERNET_KEY` collides with the coordinator's `core.fernet_key`."""
+    secret = _sensitive_secret()
+    relation = _provider_relation("[CORE]\nFERNET_KEY = pwned\n", secret.id)
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    assert provider_config == {}
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
+
+
+def test_layer1_no_collision_passes_through(context, state, workload_container):
+    """A provider writing only its own sections is left untouched, with no notice."""
+    secret = _sensitive_secret()
+    relation = _provider_relation(PROVIDER_CONFIG_TEMPLATE, secret.id)
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    assert provider_config.get("gcs") == {
+        "conn_id": "{{ provider__gcs__conn_id }}",
+        "project": "my-project",
+    }
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE not in status_messages
+
+
+def test_layer1_drops_orphaned_sensitive_value_on_collision(context, state, workload_container):
+    """A collision on a sensitive option also drops its now-orphaned secret value."""
+    secret = _sensitive_secret({"provider__api__secret_key": "EVIL"})
+    # api.secret_key is coordinator-owned; the provider backs it with a secret.
+    relation = _provider_relation(
+        "[api]\nsecret_key = {{ provider__api__secret_key }}\n", secret.id
+    )
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        provider_sensitive = manager.charm._provider_sensitive_data
+
+    assert "api" not in provider_config
+    assert provider_sensitive == {}
+
+
+def test_layer1_retains_non_colliding_options_in_a_colliding_section(
+    context, state, workload_container
+):
+    """Within one section, only the colliding option is dropped; its siblings stay.
+
+    The coordinator owns ``core.fernet_key`` but not ``core.dags_folder``, so a
+    provider ``[core]`` carrying both keeps the section -- reduced to just its own
+    option -- rather than losing the section wholesale.
+    """
+    secret = _sensitive_secret()
+    relation = _provider_relation(
+        "[core]\nfernet_key = pwned\ndags_folder = /opt/airflow/provider_dags\n", secret.id
+    )
+    state_in = dataclasses.replace(
+        state, relations=[*state.relations, relation], secrets=[*state.secrets, secret]
+    )
+
+    with context(context.on.start(), state_in) as manager:
+        manager.run()
+        provider_config = manager.charm._provider_config
+        status_messages = list(manager.charm._status_messages)
+
+    assert provider_config.get("core") == {"dags_folder": "/opt/airflow/provider_dags"}
+    assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in status_messages
+
+
+def test_layer1_owned_keys_match_the_base_template(context, state, workload_container):
+    """Pin the owned set the base template contributes, with extras left empty.
+
+    The render supplies ``render_sensitive_data=True`` and nothing else, so any
+    other conditional added to the template evaluates falsey and silently drops
+    its keys from the owned set, reopening them to provider override.
+    """
+    with context(context.on.start(), state) as manager:
+        owned = manager.charm._config_generator.owned_keys({})
+
+    assert owned == frozenset(
+        {
+            "core.executor",
+            "core.load_examples",
+            "core.fernet_key",
+            "core.dagbag_import_error_tracebacks",
+            "core.check_migrations",
+            # Only present because the render passes render_sensitive_data=True.
+            "database.sql_alchemy_conn",
+            "api.secret_key",
+            "api.enable_swagger_ui",
+            "api_auth.jwt_secret",
+            "scheduler.enable_healthcheck",
+        }
     )
