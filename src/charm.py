@@ -23,6 +23,7 @@ import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_servic
 import mergedeep
 import object_storage
 import ops
+from charmlibs.interfaces import otlp
 from ops.pebble import LayerDict
 
 import command_executor
@@ -174,6 +175,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             skip_creation=False,
         )
 
+        self._otlp_requirer = otlp.OtlpRequirer(
+            self,
+            relation_name=constants.SEND_OTLP_RELATION_NAME,
+            protocols=["http"],
+            telemetries=["logs", "metrics", "traces"],
+        )
+
         for event in [
             self.on.start,
             self.on.config_changed,
@@ -186,6 +194,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_broken,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_changed,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_broken,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
@@ -679,6 +689,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
+    @property
+    def _otlp_endpoint(self) -> str | None:
+        """Return the HTTP OTLP endpoint URL if provided over send-otlp."""
+        endpoint = next(iter(self._otlp_requirer.endpoints.values()), None)
+        return endpoint.endpoint if endpoint else None
+
     @functools.cached_property
     def _owned_extra_config(self) -> dict:
         """The coordinator's own config contribution on top of the base template.
@@ -980,6 +996,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._update_oauth_config()
             self._configure_pebble_layer()
             self._write_airflow_config()
+            self._otlp_requirer.publish()
 
             # Use peer relation data to track if db migration has run
             # TODO: once we have upgrade logic, we'll need to change the
