@@ -1884,3 +1884,74 @@ class TestSparkServiceAccount:
                 result = charm._spark_service_account_data
 
         assert result is None
+
+
+class TestSendOtlp:
+    def test_otlp_endpoint_returns_none_without_relation(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify _otlp_endpoint returns None and charm is Active when send-otlp is absent."""
+        with context(context.on.start(), state) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+    def test_otlp_endpoint_returns_http_endpoint_and_publishes_databag(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify _otlp_endpoint selects the HTTP endpoint and publishes requirer app data."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "grpc",
+                            "endpoint": "1.2.3.4:4317",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://1.2.3.4:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(send_otlp_relation), state_with_otlp) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint == "http://1.2.3.4:4318"
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        assert "metadata" in otlp_relation_out.local_app_data
+        assert "rules" in otlp_relation_out.local_app_data
+
+    def test_otlp_endpoint_returns_none_when_relation_broken(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify charm reconciles cleanly when send-otlp relation is broken."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={},
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        with context(context.on.relation_broken(send_otlp_relation), state_with_otlp) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
