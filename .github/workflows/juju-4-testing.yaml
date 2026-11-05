@@ -1,0 +1,25 @@
+name: juju-4-testing
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  tests:
+    uses: canonical/workflows-team/.github/workflows/juju-testing.yaml@main
+    with:
+      juju-channel: "4.1/edge"
+      test-commands: '["just integration"]'
+      setup-command: uv tool install tox
+      purge-docker: true
+      free-disk-space: true
+      issue-labels: juju-4,bug
