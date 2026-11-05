@@ -25,6 +25,7 @@ from conftest import (
 import command_executor
 import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
+from config_generator import AirflowConfigGenerator
 from connection_manager import S3ConnectionInfo
 
 MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS = """[core]
@@ -1007,6 +1008,82 @@ class TestDagBundles:
                     git_ssh_relation.id: git_ssh_relation.remote_app_data,
                 }.items()
             ]
+
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert json.loads(
+                sensitive_data[
+                    f"connections__git_relation_{git_credentials_relation.id}_connection"
+                ]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url2",
+                "login": "user",
+                "password": "test-token",
+            }
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": {"private_key": "test-key", "strict_host_key_checking": True},
+            }
+            assert (
+                f"connections__git_relation_{git_unauthenticated_relation.id}_connection"
+                not in sensitive_data
+            )
+
+    def test_git_connection_export_refreshes_credentials(self):
+        """Export current credentials and drop removed or unauthenticated connections."""
+        credential_model = git.GitProviderModel(
+            repository_url="https://example.com/private.git",
+            authentication_method=git.AuthenticationMethodEnum.CREDENTIALS,
+            credentials_username="user",
+            credentials_personal_access_token="old-token",
+        )
+        ssh_model = git.GitProviderModel(
+            repository_url="git@example.com:private.git",
+            authentication_method=git.AuthenticationMethodEnum.SSH,
+            ssh_private_key="private-key\nsecond-line",
+            ssh_passphrase="passphrase",
+            ssh_strict_host_key_checking=False,
+            ssh_port=2222,
+        )
+        charm = unittest.mock.Mock(
+            spec=AirflowCoordinatorK8SOperatorCharm,
+            s3_relation_connections={},
+            git_relation_connections={1: credential_model, 2: ssh_model},
+        )
+        generator = AirflowConfigGenerator(charm)
+        credential_key = "connections__git_relation_1_connection"
+        ssh_key = "connections__git_relation_2_connection"
+
+        connections = generator._connection_configurations
+        assert json.loads(connections[credential_key])["password"] == "old-token"
+        assert json.loads(connections[ssh_key])["extra"] == {
+            "private_key": "private-key\nsecond-line",
+            "private_key_passphrase": "passphrase",
+            "strict_host_key_checking": False,
+            "ssh_port": "2222",
+        }
+
+        charm.git_relation_connections[1] = credential_model.model_copy(
+            update={"credentials_personal_access_token": 'rotated-token@:%"\\'}
+        )
+        charm.git_relation_connections[2] = ssh_model.model_copy(
+            update={"ssh_private_key": "rotated-key"}
+        )
+        connections = generator._connection_configurations
+        assert json.loads(connections[credential_key])["password"] == 'rotated-token@:%"\\'
+        assert json.loads(connections[ssh_key])["extra"]["private_key"] == "rotated-key"
+
+        del charm.git_relation_connections[1]
+        charm.git_relation_connections[2] = git.GitProviderModel(
+            repository_url="https://example.com/public.git"
+        )
+        assert generator._connection_configurations == {}
 
     def test_change_in_git_connection(
         self,
