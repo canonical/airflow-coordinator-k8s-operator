@@ -813,6 +813,13 @@ def test_send_otlp_integration(juju: jubilant.Juju):
     status = juju.status()
     assert "send-otlp" in status.apps["airflow-coordinator-k8s"].relations
 
+    unit_info = json.loads(
+        juju.cli("show-unit", "otelcol/0", "--endpoint", "receive-otlp", "--format", "json")
+    )
+    app_data = unit_info["otelcol/0"]["relation-info"][0]["application-data"]
+    assert "metadata" in app_data
+    assert "rules" in app_data
+
     logger.info("Removing send-otlp integration")
     juju.remove_relation(
         "airflow-coordinator-k8s:send-otlp",

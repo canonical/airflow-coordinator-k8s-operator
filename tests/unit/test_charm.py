@@ -1942,7 +1942,24 @@ class TestSendOtlp:
         """Verify charm reconciles cleanly when send-otlp relation is broken."""
         send_otlp_relation = ops.testing.Relation(
             constants.SEND_OTLP_RELATION_NAME,
-            remote_app_data={},
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "grpc",
+                            "endpoint": "1.2.3.4:4317",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://1.2.3.4:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
         )
         state_with_otlp = dataclasses.replace(
             state,
@@ -1955,3 +1972,24 @@ class TestSendOtlp:
 
         assert state_out.unit_status == ops.ActiveStatus()
 
+    def test_otlp_publishes_databag_when_charm_waiting_or_blocked(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify publish() runs even when _perform_checks raises (container not ready)."""
+        container_not_ready = dataclasses.replace(workload_container, can_connect=False)
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={},
+        )
+        state_not_ready = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+            containers=[container_not_ready],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_not_ready)
+
+        assert state_out.unit_status == ops.WaitingStatus(constants.WAITING_FOR_CONTAINER_MESSAGE)
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        assert "metadata" in otlp_relation_out.local_app_data
+        assert "rules" in otlp_relation_out.local_app_data

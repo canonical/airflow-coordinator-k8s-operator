@@ -691,8 +691,11 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     @property
     def _otlp_endpoint(self) -> str | None:
-        """Return the HTTP OTLP endpoint URL if provided over send-otlp."""
-        endpoint = next(iter(self._otlp_requirer.endpoints.values()), None)
+        """Return the HTTP OTLP endpoint URL if provided over an active send-otlp relation."""
+        relation = self.model.get_relation(constants.SEND_OTLP_RELATION_NAME)
+        if not relation or not relation.active:
+            return None
+        endpoint = self._otlp_requirer.endpoints.get(relation.id)
         return endpoint.endpoint if endpoint else None
 
     @functools.cached_property
@@ -991,12 +994,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return
 
         try:
+            self._otlp_requirer.publish()
             self._perform_checks()
             self._ensure_airflow_keys_generated()
             self._update_oauth_config()
             self._configure_pebble_layer()
             self._write_airflow_config()
-            self._otlp_requirer.publish()
 
             # Use peer relation data to track if db migration has run
             # TODO: once we have upgrade logic, we'll need to change the
