@@ -833,14 +833,30 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "json",
             )
         )
-        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"][
-            "relation-info"
-        ][0]["application-data"]
+        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"]["relation-info"][
+            0
+        ]["application-data"]
         endpoints = json.loads(coordinator_app_data["endpoints"])
         http_endpoints = [ep["endpoint"] for ep in endpoints if ep.get("protocol") == "http"]
         assert len(http_endpoints) == 1
-        assert http_endpoints[0].startswith("http://")
-        assert http_endpoints[0].endswith(":4318")
+        expected_otlp_endpoint = http_endpoints[0]
+        assert expected_otlp_endpoint.startswith("http://")
+        assert expected_otlp_endpoint.endswith(":4318")
+
+        # Verify every core charm receives otlp_endpoint and renders its own
+        # otel_service in [metrics] and [traces] of airflow.cfg.
+        for component in AIRFLOW_COMPONENTS:
+            app_name = f"airflow-{component}-mock"
+            config = _core_charm_config(juju, component)
+            assert "[metrics]" in config
+            assert "[traces]" in config
+            assert "otel_on = True" in config
+            assert "otel_port = 4318" in config
+            assert f"otel_service = {app_name}" in config
+            assert "otel_ssl_active = False" in config
+
+            otlp_endpoint = juju.run(f"{app_name}/0", "get-otlp-endpoint").results["otlp-endpoint"]
+            assert otlp_endpoint == expected_otlp_endpoint
 
         logger.info("Removing send-otlp integration")
         juju.remove_relation(
@@ -859,7 +875,18 @@ def test_send_otlp_integration(juju: jubilant.Juju):
 
         status = juju.status()
         assert "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+
+        # Verify [metrics] and [traces] are removed and otlp_endpoint is cleared on all core charms
+        config = _wait_for_core_configs(
+            juju, lambda c: "[metrics]" not in c and "[traces]" not in c
+        )
+        assert "[metrics]" not in config
+        assert "[traces]" not in config
+        for component in AIRFLOW_COMPONENTS:
+            otlp_endpoint = juju.run(f"airflow-{component}-mock/0", "get-otlp-endpoint").results[
+                "otlp-endpoint"
+            ]
+            assert otlp_endpoint == ""
     finally:
         logger.info("Removing opentelemetry-collector-k8s")
         juju.remove_application("otelcol", force=True)
-
