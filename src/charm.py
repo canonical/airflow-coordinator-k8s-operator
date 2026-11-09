@@ -720,6 +720,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             (self._kubernetes_executor_config or {}),
             self._config_generator.coordinator_charm_core_config,
             self._config_generator.auth_manager_config,
+            self._config_generator.telemetry_config,
         )
 
     @property
@@ -933,6 +934,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
+                "otel_service": self.app.name,
             },
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
@@ -1027,6 +1029,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
+                otlp_endpoint=self._otlp_endpoint,
                 **(
                     {"extra_data": self._spark_service_account_data}
                     if self._spark_service_account_data
