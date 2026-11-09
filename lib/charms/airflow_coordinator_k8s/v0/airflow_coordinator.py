@@ -43,6 +43,8 @@ class AirflowRequirerCharm(ops.CharmBase):
 template and sensitive data
 3. `write_airflow_config(filepath)`: renders and writes the Airflow config to
 a local filesystem path
+4. `otlp_endpoint`: the HTTP OTLP endpoint URL shared by the coordinator charm,
+if any
 
 `AirflowCoordinatorRequires` will invoke the provided `callback` when:
 - the coordinator charm first shares the airflow config
@@ -171,7 +173,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 9
+LIBPATCH = 10
 
 
 logger = logging.getLogger(__name__)
@@ -288,6 +290,9 @@ class AirflowCoordinatorProviderModel(data_interfaces.BaseCommonModel):
 
     # CA chains for Airflow connections
     tls_ca_chains: typing.Optional[dict[str, str]] = None
+
+    # HTTP OTLP endpoint URL from the coordinator's send-otlp relation
+    otlp_endpoint: typing.Optional[str] = None
 
     # hack to enable databag diff computation with data_interfaces v1 charm lib
     request_id: str = pydantic.Field(default="fixed_request_id", exclude=True)
@@ -462,6 +467,9 @@ class AirflowCoordinatorRequirerEventHandler(
             "config-template" in _diff.changed
             or "kubernetes-executor-pod-spec" in _diff.changed
             or "sensitive-data" in _diff.changed
+            or "otlp-endpoint" in _diff.added
+            or "otlp-endpoint" in _diff.changed
+            or "otlp-endpoint" in _diff.deleted
         ):
             getattr(self.on, "airflow_config_updated").emit(
                 event.relation, app=event.app, unit=event.unit, content=content
@@ -673,6 +681,7 @@ class AirflowCoordinatorProviderEventHandler(
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
         extra_data: typing.Optional[dict[str, str]] = None,
+        otlp_endpoint: typing.Optional[str] = None,
     ):
         """Update data to send to related core charms."""
         if not self.interface.relations:
@@ -698,6 +707,7 @@ class AirflowCoordinatorProviderEventHandler(
 
                     model.kubernetes_executor_pod_spec = kubernetes_executor_pod_spec
                     model.webserver_config_template = webserver_config_template
+                    model.otlp_endpoint = otlp_endpoint
 
                     if sensitive_data:
                         model.sensitive_data = json.dumps(sensitive_data)
@@ -718,6 +728,7 @@ class AirflowCoordinatorProviderEventHandler(
                     sensitive_data=json.dumps(sensitive_data),
                     tls_ca_chains=tls_ca_chains,
                     extra_data=extra_data or None,
+                    otlp_endpoint=otlp_endpoint,
                 )
 
             self.interface.write_model(relation.id, model)
@@ -744,6 +755,7 @@ class AirflowCoordinatorProviderEventHandler(
                     model.config_template = None
                     model.kubernetes_executor_pod_spec = None
                     model.webserver_config_template = None
+                    model.otlp_endpoint = None
                     # a truthy value assigned to avoid underlying secret from being deleted
                     model.sensitive_data = json.dumps({})
 
@@ -838,6 +850,14 @@ class AirflowCoordinatorRequires(ops.Object):
         return self._requirer_handler.provider_content
 
     @property
+    def otlp_endpoint(self) -> typing.Optional[str]:
+        """Return the HTTP OTLP endpoint URL shared by the coordinator, if any."""
+        if not self._charm.model.get_relation(self._relation_name):
+            return None
+        content = self.provider_content
+        return content.otlp_endpoint if content else None
+
+    @property
     def can_write_airflow_config(self) -> bool:
         """Return True if it is safe to write the Airflow config to the container.
 
@@ -857,9 +877,11 @@ class AirflowCoordinatorRequires(ops.Object):
             config_path: the path where the configuration file will be saved.
         """
         provider_content = self.provider_content
-        config = jinja2.Template(provider_content.config_template).render(
-            **json.loads(provider_content.sensitive_data)
-        )
+        render_context = {
+            **json.loads(provider_content.sensitive_data),
+            "otel_service": self._charm.app.name,
+        }
+        config = jinja2.Template(provider_content.config_template).render(**render_context)
         path = pathlib.Path(config_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(config)
@@ -971,8 +993,12 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
     def airflow_config_needs_update(self, config_path: str) -> bool:
         """Check whether the rendered Airflow config differs from the file currently on disk."""
         provider_content = self._requirer_handler.provider_content
+        render_context = {
+            **json.loads(provider_content.sensitive_data),
+            "otel_service": self._charm.app.name,
+        }
         rendered_config = jinja2.Template(provider_content.config_template).render(
-            **json.loads(provider_content.sensitive_data)
+            **render_context
         )
 
         if self._workload_container.exists(config_path):
@@ -989,7 +1015,10 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             container=self._workload_container,
             config_path=config_path,
             config_template=provider_content.config_template,
-            sensitive_data=json.loads(provider_content.sensitive_data),
+            sensitive_data={
+                **json.loads(provider_content.sensitive_data),
+                "otel_service": self._charm.app.name,
+            },
             user=user,
             group=group,
         )
@@ -1252,6 +1281,7 @@ class AirflowCoordinatorProvides(ops.Object):
         sensitive_data: dict[str, str] = {},
         tls_ca_chains: dict[str, str] = {},
         extra_data: typing.Optional[dict[str, str]] = None,
+        otlp_endpoint: typing.Optional[str] = None,
     ) -> None:
         """Update config with related core charms.
 
@@ -1263,6 +1293,7 @@ class AirflowCoordinatorProvides(ops.Object):
                 spec jinja templates with.
             tls_ca_chains: mapping from filename to tls ca chain file contents
             extra_data: Any additional data that helps airflow's integration with external projects
+            otlp_endpoint: (optional) HTTP OTLP endpoint URL for OpenTelemetry telemetry export.
         """
         self._provider_handler.update_content(
             config_template=config_template,
@@ -1271,4 +1302,5 @@ class AirflowCoordinatorProvides(ops.Object):
             sensitive_data=sensitive_data,
             tls_ca_chains=tls_ca_chains,
             extra_data=extra_data,
+            otlp_endpoint=otlp_endpoint,
         )
