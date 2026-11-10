@@ -9,6 +9,7 @@ import json
 import logging
 import pathlib
 import time
+import urllib.parse
 
 import cryptography.fernet
 import jubilant
@@ -805,10 +806,17 @@ def test_send_otlp_integration(juju: jubilant.Juju):
 
         juju.wait(
             lambda status: (
-                jubilant.all_active(status, "airflow-coordinator-k8s")
-                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                jubilant.all_active(
+                    status,
+                    "airflow-coordinator-k8s",
+                    *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
+                )
+                and jubilant.all_blocked(status, "otelcol")
+                and jubilant.all_agents_idle(status)
             ),
             error=jubilant.any_error,
+            successes=3,
+            delay=5,
         )
 
         status = juju.status()
@@ -842,6 +850,8 @@ def test_send_otlp_integration(juju: jubilant.Juju):
         expected_otlp_endpoint = http_endpoints[0]
         assert expected_otlp_endpoint.startswith("http://")
         assert expected_otlp_endpoint.endswith(":4318")
+        expected_otel_host = urllib.parse.urlparse(expected_otlp_endpoint).hostname
+        assert expected_otel_host
 
         # Verify every core charm receives otlp_endpoint and renders its own
         # otel_service in [metrics] and [traces] of airflow.cfg.
@@ -851,6 +861,7 @@ def test_send_otlp_integration(juju: jubilant.Juju):
             assert "[metrics]" in config
             assert "[traces]" in config
             assert "otel_on = True" in config
+            assert f"otel_host = {expected_otel_host}" in config
             assert "otel_port = 4318" in config
             assert f"otel_service = {app_name}" in config
             assert "otel_ssl_active = False" in config

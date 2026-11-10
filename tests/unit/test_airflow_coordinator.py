@@ -550,6 +550,7 @@ class TestAirflowCoordinatorRequires:
                 == "test-config: s3cret\notel_service = airflow-base-requires-application"
             )
 
+
 class TestAirflowCoordinatorCoreRequires:
     def get_juju_log_line(self, log_level: str, event: ops.EventBase):
         return ops.testing.JujuLogLine(
