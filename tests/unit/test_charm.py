@@ -25,7 +25,6 @@ from conftest import (
 import command_executor
 import constants
 from charm import AirflowCoordinatorK8SOperatorCharm
-from config_generator import AirflowConfigGenerator
 from connection_manager import S3ConnectionInfo
 
 MOCK_CONFIG_TEMPLATE_WITH_RUNTIME_SECRETS = """[core]
@@ -965,6 +964,7 @@ class TestDagBundles:
             except (configparser.NoSectionError, configparser.NoOptionError):
                 pass
 
+    @pytest.mark.parametrize("ssh_options", [False, True])
     def test_valid_git_relations_succeed(
         self,
         context,
@@ -972,8 +972,46 @@ class TestDagBundles:
         git_unauthenticated_relation,
         git_credentials_relation,
         git_ssh_relation,
+        git_ssh_secret,
+        ssh_options,
     ):
         """Valid DAG bundles configured when multiple related git-integrators."""
+        expected_ssh_extra = {"private_key": "test-key", "strict_host_key_checking": True}
+        if ssh_options:
+            git_ssh_relation = dataclasses.replace(
+                git_ssh_relation,
+                remote_app_data={
+                    **git_ssh_relation.remote_app_data,
+                    "secret-ssh-passphrase": git_ssh_secret.id,
+                    "ssh-strict-host-key-checking": "false",
+                    "ssh-port": "2222",
+                },
+            )
+            git_ssh_secret = dataclasses.replace(
+                git_ssh_secret,
+                latest_content={
+                    "ssh-private-key": "private-key\nsecond-line",
+                    "ssh-passphrase": "passphrase",
+                },
+            )
+            state_without_s3 = dataclasses.replace(
+                state_without_s3,
+                relations=[
+                    git_ssh_relation if relation.id == git_ssh_relation.id else relation
+                    for relation in state_without_s3.relations
+                ],
+                secrets=[
+                    git_ssh_secret if secret.id == git_ssh_secret.id else secret
+                    for secret in state_without_s3.secrets
+                ],
+            )
+            expected_ssh_extra = {
+                "private_key": "private-key\nsecond-line",
+                "private_key_passphrase": "passphrase",
+                "strict_host_key_checking": False,
+                "ssh_port": "2222",
+            }
+
         state_out = context.run(context.on.start(), state_without_s3)
 
         assert state_out.unit_status == ops.ActiveStatus()
@@ -1028,62 +1066,12 @@ class TestDagBundles:
             ) == {
                 "conn_type": "git",
                 "host": "test-repo-url3",
-                "extra": {"private_key": "test-key", "strict_host_key_checking": True},
+                "extra": expected_ssh_extra,
             }
             assert (
                 f"connections__git_relation_{git_unauthenticated_relation.id}_connection"
                 not in sensitive_data
             )
-
-    def test_git_connection_export_refreshes_credentials(self):
-        """Export current credentials and drop removed or unauthenticated connections."""
-        credential_model = git.GitProviderModel(
-            repository_url="https://example.com/private.git",
-            authentication_method=git.AuthenticationMethodEnum.CREDENTIALS,
-            credentials_username="user",
-            credentials_personal_access_token="old-token",
-        )
-        ssh_model = git.GitProviderModel(
-            repository_url="git@example.com:private.git",
-            authentication_method=git.AuthenticationMethodEnum.SSH,
-            ssh_private_key="private-key\nsecond-line",
-            ssh_passphrase="passphrase",
-            ssh_strict_host_key_checking=False,
-            ssh_port=2222,
-        )
-        charm = unittest.mock.Mock(
-            spec=AirflowCoordinatorK8SOperatorCharm,
-            s3_relation_connections={},
-            git_relation_connections={1: credential_model, 2: ssh_model},
-        )
-        generator = AirflowConfigGenerator(charm)
-        credential_key = "connections__git_relation_1_connection"
-        ssh_key = "connections__git_relation_2_connection"
-
-        connections = generator._connection_configurations
-        assert json.loads(connections[credential_key])["password"] == "old-token"
-        assert json.loads(connections[ssh_key])["extra"] == {
-            "private_key": "private-key\nsecond-line",
-            "private_key_passphrase": "passphrase",
-            "strict_host_key_checking": False,
-            "ssh_port": "2222",
-        }
-
-        charm.git_relation_connections[1] = credential_model.model_copy(
-            update={"credentials_personal_access_token": 'rotated-token@:%"\\'}
-        )
-        charm.git_relation_connections[2] = ssh_model.model_copy(
-            update={"ssh_private_key": "rotated-key"}
-        )
-        connections = generator._connection_configurations
-        assert json.loads(connections[credential_key])["password"] == 'rotated-token@:%"\\'
-        assert json.loads(connections[ssh_key])["extra"]["private_key"] == "rotated-key"
-
-        del charm.git_relation_connections[1]
-        charm.git_relation_connections[2] = git.GitProviderModel(
-            repository_url="https://example.com/public.git"
-        )
-        assert generator._connection_configurations == {}
 
     def test_change_in_git_connection(
         self,
@@ -1361,6 +1349,16 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                in sensitive_data
+            )
+            assert f"connections__git_relation_{git_ssh_relation.id}_connection" in sensitive_data
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
@@ -1423,13 +1421,13 @@ class TestDagBundles:
 
         relations_with_removed_git_relation = [
             relation
-            for relation in state_without_s3.relations
+            for relation in state_out.relations
             if relation.endpoint != constants.GIT_ENDPOINT_NAME
         ]
         relations_with_removed_git_relation.append(git_ssh_relation)
 
         state_modified = dataclasses.replace(
-            state_without_s3,
+            state_out,
             relations=relations_with_removed_git_relation,
             containers=[workload_container],
         )
@@ -1441,6 +1439,22 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                not in sensitive_data
+            )
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": {"private_key": "test-key", "strict_host_key_checking": True},
+            }
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
