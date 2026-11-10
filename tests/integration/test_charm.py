@@ -784,3 +784,82 @@ def test_provider_relation_removed_restores_baseline(juju: jubilant.Juju):
 
     assert "provider_escaping" not in config
     assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+
+
+def test_send_otlp_integration(juju: jubilant.Juju):
+    """Deploy opentelemetry-collector-k8s and verify send-otlp integration."""
+    logger.info("Deploying opentelemetry-collector-k8s")
+    juju.deploy(
+        "opentelemetry-collector-k8s",
+        app="otelcol",
+        channel="0.130/stable",
+        trust=True,
+    )
+
+    try:
+        logger.info("Integrating coordinator:send-otlp <-> otelcol:receive-otlp")
+        juju.integrate(
+            "airflow-coordinator-k8s:send-otlp",
+            "otelcol:receive-otlp",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+            ),
+            error=jubilant.any_error,
+        )
+
+        status = juju.status()
+        assert "send-otlp" in status.apps["airflow-coordinator-k8s"].relations
+
+        # Verify coordinator -> collector direction (published metadata & rules)
+        otelcol_unit_info = json.loads(
+            juju.cli("show-unit", "otelcol/0", "--endpoint", "receive-otlp", "--format", "json")
+        )
+        otelcol_app_data = otelcol_unit_info["otelcol/0"]["relation-info"][0]["application-data"]
+        assert "metadata" in otelcol_app_data
+        assert "rules" in otelcol_app_data
+
+        # Verify collector -> coordinator direction (received HTTP OTLP endpoint)
+        coordinator_unit_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "airflow-coordinator-k8s/0",
+                "--endpoint",
+                "send-otlp",
+                "--format",
+                "json",
+            )
+        )
+        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"][
+            "relation-info"
+        ][0]["application-data"]
+        endpoints = json.loads(coordinator_app_data["endpoints"])
+        http_endpoints = [ep["endpoint"] for ep in endpoints if ep.get("protocol") == "http"]
+        assert len(http_endpoints) == 1
+        assert http_endpoints[0].startswith("http://")
+        assert http_endpoints[0].endswith(":4318")
+
+        logger.info("Removing send-otlp integration")
+        juju.remove_relation(
+            "airflow-coordinator-k8s:send-otlp",
+            "otelcol:receive-otlp",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
+
+        status = juju.status()
+        assert "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+    finally:
+        logger.info("Removing opentelemetry-collector-k8s")
+        juju.remove_application("otelcol", force=True)
+

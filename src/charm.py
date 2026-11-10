@@ -23,6 +23,7 @@ import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_servic
 import mergedeep
 import object_storage
 import ops
+from charmlibs.interfaces import otlp
 from ops.pebble import LayerDict
 
 import command_executor
@@ -174,6 +175,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             skip_creation=False,
         )
 
+        self._otlp_requirer = otlp.OtlpRequirer(
+            self,
+            relation_name=constants.SEND_OTLP_RELATION_NAME,
+            protocols=["http"],
+            telemetries=["logs", "metrics", "traces"],
+        )
+
         for event in [
             self.on.start,
             self.on.config_changed,
@@ -186,6 +194,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_broken,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_changed,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_broken,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
@@ -679,6 +689,15 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
+    @property
+    def _otlp_endpoint(self) -> str | None:
+        """Return the HTTP OTLP endpoint URL if provided over an active send-otlp relation."""
+        relation = self.model.get_relation(constants.SEND_OTLP_RELATION_NAME)
+        if not relation or not relation.active:
+            return None
+        endpoint = self._otlp_requirer.endpoints.get(relation.id)
+        return endpoint.endpoint if endpoint else None
+
     @functools.cached_property
     def _owned_extra_config(self) -> dict:
         """The coordinator's own config contribution on top of the base template.
@@ -975,6 +994,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return
 
         try:
+            self._otlp_requirer.publish()
             self._perform_checks()
             self._ensure_airflow_keys_generated()
             self._update_oauth_config()
