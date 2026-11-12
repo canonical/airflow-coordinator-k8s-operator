@@ -8,6 +8,7 @@ import collections.abc
 import json
 import logging
 import pathlib
+import re
 import time
 import urllib.parse
 
@@ -480,6 +481,19 @@ def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
     return {_core_charm_config(juju, component) for component in AIRFLOW_COMPONENTS}
 
 
+_OTELCOL_ACCEPTED_METRICS_RE = re.compile(
+    r'otelcol_receiver_accepted_metric_points\{[^}]*receiver="otlp/[^"]*"'
+    r'[^}]*transport="http"[^}]*\}\s+([0-9.]+)'
+)
+
+
+def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float:
+    """Return the HTTP OTLP accepted metric points counter from otelcol self-monitoring."""
+    out = juju.ssh("otelcol/0", "curl -s http://localhost:8888/metrics")
+    match = _OTELCOL_ACCEPTED_METRICS_RE.search(out)
+    return float(match.group(1)) if match else 0.0
+
+
 def _wait_for_core_configs(
     juju: jubilant.Juju,
     predicate: collections.abc.Callable[[str], bool],
@@ -869,6 +883,18 @@ def test_send_otlp_integration(juju: jubilant.Juju):
             otlp_endpoint = juju.run(f"{app_name}/0", "get-otlp-endpoint").results["otlp-endpoint"]
             assert otlp_endpoint == expected_otlp_endpoint
 
+        # Verify Airflow's OTel metric exporter initializes from the rendered airflow.cfg
+        # and delivers metric points over HTTP OTLP to the collector.
+        before_points = _otelcol_accepted_metric_points(juju)
+        juju.ssh(
+            "airflow-scheduler-mock/0",
+            "AIRFLOW_CONFIG=/airflow.cfg python3 -c "
+            '"from opentelemetry import metrics; from airflow.stats import Stats; '
+            "Stats.incr('test_metric'); metrics.get_meter_provider().force_flush()\"",
+            container="workload",
+        )
+        assert _otelcol_accepted_metric_points(juju) > before_points
+
         logger.info("Removing send-otlp integration")
         juju.remove_relation(
             "airflow-coordinator-k8s:send-otlp",
@@ -888,12 +914,11 @@ def test_send_otlp_integration(juju: jubilant.Juju):
         assert "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
 
         # Verify [metrics] and [traces] are removed and otlp_endpoint is cleared on all core charms
-        config = _wait_for_core_configs(
-            juju, lambda c: "[metrics]" not in c and "[traces]" not in c
-        )
-        assert "[metrics]" not in config
-        assert "[traces]" not in config
+        _wait_for_core_configs(juju, lambda c: "[metrics]" not in c and "[traces]" not in c)
         for component in AIRFLOW_COMPONENTS:
+            component_config = _core_charm_config(juju, component)
+            assert "[metrics]" not in component_config
+            assert "[traces]" not in component_config
             otlp_endpoint = juju.run(f"airflow-{component}-mock/0", "get-otlp-endpoint").results[
                 "otlp-endpoint"
             ]

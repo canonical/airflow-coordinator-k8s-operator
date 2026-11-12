@@ -852,7 +852,8 @@ class AirflowCoordinatorRequires(ops.Object):
     @property
     def otlp_endpoint(self) -> typing.Optional[str]:
         """Return the HTTP OTLP endpoint URL shared by the coordinator, if any."""
-        if not self._charm.model.get_relation(self._relation_name):
+        relation = self._charm.model.get_relation(self._relation_name)
+        if not relation or not relation.active:
             return None
         content = self.provider_content
         return content.otlp_endpoint if content else None
@@ -867,6 +868,15 @@ class AirflowCoordinatorRequires(ops.Object):
         content = self.provider_content
         return bool(content and content.config_template and content.sensitive_data)
 
+    def _render_context(
+        self, provider_content: AirflowCoordinatorProviderModel
+    ) -> dict[str, typing.Any]:
+        """Build the Jinja2 render context for the Airflow config template."""
+        return {
+            **json.loads(provider_content.sensitive_data),
+            "otel_service": self._charm.app.name,
+        }
+
     def write_airflow_config(self, config_path: str) -> None:
         """Render the Airflow config and write it to a local filesystem path.
 
@@ -877,11 +887,9 @@ class AirflowCoordinatorRequires(ops.Object):
             config_path: the path where the configuration file will be saved.
         """
         provider_content = self.provider_content
-        render_context = {
-            **json.loads(provider_content.sensitive_data),
-            "otel_service": self._charm.app.name,
-        }
-        config = jinja2.Template(provider_content.config_template).render(**render_context)
+        config = jinja2.Template(provider_content.config_template).render(
+            **self._render_context(provider_content)
+        )
         path = pathlib.Path(config_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(config)
@@ -993,12 +1001,8 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
     def airflow_config_needs_update(self, config_path: str) -> bool:
         """Check whether the rendered Airflow config differs from the file currently on disk."""
         provider_content = self._requirer_handler.provider_content
-        render_context = {
-            **json.loads(provider_content.sensitive_data),
-            "otel_service": self._charm.app.name,
-        }
         rendered_config = jinja2.Template(provider_content.config_template).render(
-            **render_context
+            **self._render_context(provider_content)
         )
 
         if self._workload_container.exists(config_path):
@@ -1015,10 +1019,7 @@ class AirflowCoordinatorCoreRequires(AirflowCoordinatorRequires):
             container=self._workload_container,
             config_path=config_path,
             config_template=provider_content.config_template,
-            sensitive_data={
-                **json.loads(provider_content.sensitive_data),
-                "otel_service": self._charm.app.name,
-            },
+            sensitive_data=self._render_context(provider_content),
             user=user,
             group=group,
         )

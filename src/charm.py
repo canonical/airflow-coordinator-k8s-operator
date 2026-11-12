@@ -691,12 +691,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     @property
     def _otlp_endpoint(self) -> str | None:
-        """Return the HTTP OTLP endpoint URL if provided over an active send-otlp relation."""
+        """Return the validated HTTP OTLP endpoint URL from an active send-otlp relation."""
         relation = self.model.get_relation(constants.SEND_OTLP_RELATION_NAME)
         if not relation or not relation.active:
             return None
-        endpoint = self._otlp_requirer.endpoints.get(relation.id)
-        return endpoint.endpoint if endpoint else None
+        endpoint_obj = self._otlp_requirer.endpoints.get(relation.id)
+        if not endpoint_obj or not endpoint_obj.endpoint:
+            return None
+        if not self._config_generator.parse_otlp_endpoint(endpoint_obj.endpoint):
+            return None
+        return endpoint_obj.endpoint
 
     @functools.cached_property
     def _owned_extra_config(self) -> dict:

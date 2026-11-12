@@ -515,6 +515,33 @@ class TestAirflowCoordinatorRequires:
             manager.run()
             assert manager.charm.requirer.otlp_endpoint == "http://1.2.3.4:4318"
 
+    def test_otlp_endpoint_returns_none_during_relation_broken(
+        self,
+        base_requires_context,
+        application_airflow_coordinator_relation,
+        coordinator_relation_secret,
+        valid_relation_data,
+    ):
+        relation_with_otlp = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data={
+                **valid_relation_data,
+                "otlp-endpoint": "http://1.2.3.4:4318",
+            },
+        )
+        state = ops.testing.State(
+            leader=True,
+            relations=[relation_with_otlp],
+            secrets=[coordinator_relation_secret],
+        )
+
+        with base_requires_context(
+            base_requires_context.on.relation_broken(relation_with_otlp),
+            state,
+        ) as manager:
+            manager.run()
+            assert manager.charm.requirer.otlp_endpoint is None
+
     def test_write_airflow_config_renders_otel_service(
         self,
         base_requires_context,
@@ -810,6 +837,88 @@ class TestAirflowCoordinatorCoreRequires:
             assert (
                 config_file_path.read_text(encoding="utf-8")
                 == "test-config: s3cret\notel_service = airflow-core-application"
+            )
+
+    def test_otlp_endpoint_and_config_updated_in_place(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        valid_relation_data,
+    ):
+        """Updating otlp-endpoint and config-template in-place emits AirflowConfigUpdatedEvent."""
+        initial_relation = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data={
+                **valid_relation_data,
+                "config-template": (
+                    "test-config: {{ secret }}\n"
+                    "otel_host = 10.0.0.1\n"
+                    "otel_port = 4318\n"
+                    "otel_service = {{ otel_service }}"
+                ),
+                "otlp-endpoint": "http://10.0.0.1:4318",
+            },
+        )
+        state_initial = dataclasses.replace(application_state, relations=[initial_relation])
+
+        with application_context(
+            application_context.on.relation_changed(initial_relation),
+            state_initial,
+        ) as manager:
+            state_after_first = manager.run()
+            assert manager.charm.requirer.otlp_endpoint == "http://10.0.0.1:4318"
+            manager.charm.requirer.write_airflow_config(
+                "/config/path",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
+            )
+
+        application_context.juju_log.clear()
+        existing_rel = state_after_first.get_relation(initial_relation.id)
+        updated_relation = dataclasses.replace(
+            existing_rel,
+            remote_app_data={
+                **valid_relation_data,
+                "config-template": (
+                    "test-config: {{ secret }}\n"
+                    "otel_host = 10.0.0.2\n"
+                    "otel_port = 4319\n"
+                    "otel_service = {{ otel_service }}"
+                ),
+                "otlp-endpoint": "http://10.0.0.2:4319",
+            },
+        )
+        state_updated = dataclasses.replace(state_after_first, relations=[updated_relation])
+
+        with application_context(
+            application_context.on.relation_changed(updated_relation),
+            state_updated,
+        ) as manager:
+            state_out = manager.run()
+            assert (
+                self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigUpdatedEvent)
+                in application_context.juju_log
+            )
+            assert manager.charm.requirer.otlp_endpoint == "http://10.0.0.2:4319"
+            assert manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+            manager.charm.requirer.write_airflow_config(
+                "/config/path",
+                user=constants.WORKLOAD_USER,
+                group=constants.WORKLOAD_GROUP,
+            )
+            assert not manager.charm.requirer.airflow_config_needs_update("/config/path")
+
+            filesystem = state_out.get_container("workload-container").get_filesystem(
+                application_context
+            )
+            config_file_path = pathlib.Path(f"{filesystem.absolute()}/config/path")
+            assert config_file_path.read_text(encoding="utf-8") == (
+                "test-config: s3cret\n"
+                "otel_host = 10.0.0.2\n"
+                "otel_port = 4319\n"
+                "otel_service = airflow-core-application"
             )
 
     def test_can_write_airflow_config_blocked_by_mismatched_airflow_version(
@@ -1608,3 +1717,35 @@ class TestAirflowCoordinatorProvides:
 
         for relation in state_without_otlp.relations:
             assert "otlp-endpoint" not in relation.local_app_data
+
+    def test_set_validation_errors_clears_otlp_endpoint(self, coordinator_waiting_context):
+        state = generate_coordinator_state()
+
+        with coordinator_waiting_context(
+            coordinator_waiting_context.on.relation_changed(
+                state.get_relations("airflow-coordinator")[0]
+            ),
+            state,
+        ) as manager:
+            manager.charm.provider.set_airflow_config(
+                config_template="template",
+                sensitive_data={"secret": "val"},
+                otlp_endpoint="http://1.2.3.4:4318",
+            )
+            state_with_otlp = manager.run()
+
+        for relation in state_with_otlp.relations:
+            assert relation.local_app_data.get("otlp-endpoint") == "http://1.2.3.4:4318"
+
+        with coordinator_waiting_context(
+            coordinator_waiting_context.on.relation_changed(
+                state_with_otlp.get_relations("airflow-coordinator")[0]
+            ),
+            state_with_otlp,
+        ) as manager:
+            manager.charm.provider.set_validation_errors()
+            state_with_errors = manager.run()
+
+        for relation in state_with_errors.relations:
+            assert "otlp-endpoint" not in relation.local_app_data
+            assert "validation-failures" in relation.local_app_data
