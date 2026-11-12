@@ -487,11 +487,43 @@ _OTELCOL_ACCEPTED_METRICS_RE = re.compile(
 )
 
 
-def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float:
-    """Return the HTTP OTLP accepted metric points counter from otelcol self-monitoring."""
+def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float | None:
+    """Return the HTTP OTLP accepted metric points counter from otelcol self-monitoring.
+
+    Returns None when the series has not been emitted yet (before any OTLP metric
+    point has been received by the collector).
+    """
     out = juju.ssh("otelcol/0", "curl -s http://localhost:8888/metrics")
     match = _OTELCOL_ACCEPTED_METRICS_RE.search(out)
-    return float(match.group(1)) if match else 0.0
+    return float(match.group(1)) if match else None
+
+
+def _assert_airflow_metric_reaches_otelcol(juju: jubilant.Juju, timeout: int = 60) -> None:
+    """Emit an Airflow metric using /airflow.cfg and poll until otelcol records it."""
+    before_points = _otelcol_accepted_metric_points(juju) or 0.0
+    deadline = time.monotonic() + timeout
+    last_points: float | None = None
+
+    while time.monotonic() < deadline:
+        juju.ssh(
+            "airflow-scheduler-mock/0",
+            "AIRFLOW_CONFIG=/airflow.cfg python3 -c "
+            '"from opentelemetry import metrics; from airflow.stats import Stats; '
+            "Stats.incr('test_metric'); "
+            "assert type(Stats.instance).__name__ == 'SafeOtelLogger', "
+            "type(Stats.instance).__name__; "
+            'metrics.get_meter_provider().force_flush()"',
+            container="workload",
+        )
+        last_points = _otelcol_accepted_metric_points(juju)
+        if last_points is not None and last_points > before_points:
+            return
+        time.sleep(5)
+
+    raise AssertionError(
+        f"Expected otelcol_receiver_accepted_metric_points > {before_points} within {timeout}s, "
+        f"got {last_points!r}"
+    )
 
 
 def _wait_for_core_configs(
@@ -885,15 +917,7 @@ def test_send_otlp_integration(juju: jubilant.Juju):
 
         # Verify Airflow's OTel metric exporter initializes from the rendered airflow.cfg
         # and delivers metric points over HTTP OTLP to the collector.
-        before_points = _otelcol_accepted_metric_points(juju)
-        juju.ssh(
-            "airflow-scheduler-mock/0",
-            "AIRFLOW_CONFIG=/airflow.cfg python3 -c "
-            '"from opentelemetry import metrics; from airflow.stats import Stats; '
-            "Stats.incr('test_metric'); metrics.get_meter_provider().force_flush()\"",
-            container="workload",
-        )
-        assert _otelcol_accepted_metric_points(juju) > before_points
+        _assert_airflow_metric_reaches_otelcol(juju)
 
         logger.info("Removing send-otlp integration")
         juju.remove_relation(
