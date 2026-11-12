@@ -481,9 +481,9 @@ def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
     return {_core_charm_config(juju, component) for component in AIRFLOW_COMPONENTS}
 
 
-_OTELCOL_ACCEPTED_METRICS_RE = re.compile(
-    r'otelcol_receiver_accepted_metric_points\{[^}]*receiver="otlp/[^"]*"'
-    r'[^}]*transport="http"[^}]*\}\s+([0-9.]+)'
+_OTELCOL_METRIC_LINE_RE = re.compile(
+    r"^otelcol_receiver_accepted_metric_points(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$",
+    re.MULTILINE,
 )
 
 
@@ -494,8 +494,11 @@ def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float | None:
     point has been received by the collector).
     """
     out = juju.ssh("otelcol/0", "curl -s http://localhost:8888/metrics")
-    match = _OTELCOL_ACCEPTED_METRICS_RE.search(out)
-    return float(match.group(1)) if match else None
+    for match in _OTELCOL_METRIC_LINE_RE.finditer(out):
+        labels = match.group(1) or ""
+        if 'receiver="otlp' in labels and 'transport="http"' in labels:
+            return float(match.group(2))
+    return None
 
 
 def _assert_airflow_metric_reaches_otelcol(juju: jubilant.Juju, timeout: int = 60) -> None:
