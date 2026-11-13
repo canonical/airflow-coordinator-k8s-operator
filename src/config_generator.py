@@ -9,6 +9,7 @@ import json
 import logging
 import pathlib
 import typing
+import urllib.parse
 
 import charms.git_integrator.v0.git as git
 import jinja2
@@ -202,6 +203,47 @@ class AirflowConfigGenerator:
             return {}
 
         return {"core": {"auth_manager": constants.FAB_AUTH_MANAGER_CLASS}}
+
+    @staticmethod
+    def parse_otlp_endpoint(endpoint: str) -> tuple[str, str, bool] | None:
+        """Validate and parse an OTLP endpoint URL into (host, port, ssl_active)."""
+        try:
+            parsed = urllib.parse.urlparse(endpoint)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                logger.warning(
+                    "Ignoring invalid OTLP endpoint %r: missing valid scheme or host", endpoint
+                )
+                return None
+            port = str(parsed.port or constants.DEFAULT_OTEL_HTTP_PORT)
+        except ValueError as e:
+            logger.warning("Ignoring invalid OTLP endpoint %r: %s", endpoint, e)
+            return None
+
+        return parsed.hostname, port, parsed.scheme == "https"
+
+    @property
+    def telemetry_config(self) -> dict[str, dict[str, str]]:
+        """Return OpenTelemetry metrics and traces config when send-otlp is active."""
+        endpoint = self._charm._otlp_endpoint
+        if not endpoint:
+            return {}
+
+        parsed_endpoint = self.parse_otlp_endpoint(endpoint)
+        if not parsed_endpoint:
+            return {}
+        host, port, ssl_active = parsed_endpoint
+
+        otel_section = {
+            "otel_on": "True",
+            "otel_host": host,
+            "otel_port": port,
+            "otel_service": "{{ otel_service | default('airflow') }}",
+            "otel_ssl_active": str(ssl_active),
+        }
+        return {
+            "metrics": dict(otel_section),
+            "traces": dict(otel_section),
+        }
 
     @property
     def dag_bundle_config(self) -> dict[str, dict[str, str]]:
