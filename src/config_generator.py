@@ -292,12 +292,12 @@ class AirflowConfigGenerator:
 
     @property
     def _connection_configurations(self) -> dict[str, str]:
-        """S3 connection details serialized as Airflow connection URIs.
+        """S3 and authenticated Git connections serialized as Airflow connection JSON.
 
-        Each value embeds the S3 secret key, so the whole mapping is sensitive and
+        Values contain credentials, so the whole mapping is sensitive and
         is merged into ``sensitive_config_values``.
         """
-        return {
+        configurations = {
             f"connections__s3_relation_{rid}_connection": json.dumps(
                 {
                     "conn_type": "aws",
@@ -308,6 +308,37 @@ class AirflowConfigGenerator:
             )
             for rid, info in self._charm.s3_relation_connections.items()
         }
+
+        for relation_id, info in self._charm.git_relation_connections.items():
+            if not info.authentication_method:
+                continue
+
+            connection: dict[str, typing.Any] = {
+                "conn_type": "git",
+                "host": info.repository_url,
+            }
+            if info.authentication_method == git.AuthenticationMethodEnum.CREDENTIALS:
+                connection.update(
+                    login=info.credentials_username,
+                    password=info.credentials_personal_access_token,
+                )
+            elif info.authentication_method == git.AuthenticationMethodEnum.SSH:
+                connection["extra"] = {
+                    key: value
+                    for key, value in {
+                        "private_key": info.ssh_private_key,
+                        "private_key_passphrase": info.ssh_passphrase,
+                        "strict_host_key_checking": info.ssh_strict_host_key_checking,
+                        "ssh_port": str(info.ssh_port) if info.ssh_port is not None else None,
+                    }.items()
+                    if value is not None
+                }
+
+            configurations[f"connections__git_relation_{relation_id}_connection"] = json.dumps(
+                connection
+            )
+
+        return configurations
 
     def owned_keys(self, owned_extra_config: dict) -> frozenset[str]:
         """Return the lowercased ``section.option`` keys the coordinator itself sets.
