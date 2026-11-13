@@ -62,11 +62,12 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 2
+LIBPATCH = 3
 
 HOST_KEY = "host"
 PORT_KEY = "port"
 INGRESS_PATH_KEY = "ingress_path"
+INGRESS_URL_KEY = "ingress_url"
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,22 @@ class AirflowAPIServerProvides(ops.Object):
             return
         self._relation.data[self._charm.app].pop(INGRESS_PATH_KEY, None)
 
+    def set_ingress_url(self, url: str) -> None:
+        """Write the ingress URL to the relation.
+
+        The URL should include scheme, authority, and path prefix as assigned
+        by the ingress provider (e.g. ``https://example.com/airflow``).
+        """
+        if not self._relation or not self._charm.unit.is_leader():
+            return
+        self._relation.data[self._charm.app][INGRESS_URL_KEY] = url
+
+    def clear_ingress_url(self) -> None:
+        """Remove the ingress URL from the relation."""
+        if not self._relation or not self._charm.unit.is_leader():
+            return
+        self._relation.data[self._charm.app].pop(INGRESS_URL_KEY, None)
+
 
 class AirflowAPIServerRequires(ops.Object):
     """A requirer handler encapsulating the airflow api server relation."""
@@ -171,3 +188,15 @@ class AirflowAPIServerRequires(ops.Object):
             return None
 
         return self._relation.data[self._relation.app].get(INGRESS_PATH_KEY)
+
+    @property
+    def api_server_ingress_url(self) -> typing.Optional[str]:
+        """Return API server ingress URL.
+
+        Returns the full URL (scheme + authority + path prefix) when the API server
+        is behind an ingress provider, or None when not exposed via ingress.
+        """
+        if not self._relation or not self._relation.app:
+            return None
+
+        return self._relation.data[self._relation.app].get(INGRESS_URL_KEY)
