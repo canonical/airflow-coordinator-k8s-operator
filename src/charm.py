@@ -29,6 +29,7 @@ import command_executor
 import config_generator
 import connection_manager
 import constants
+import security_events
 import webserver_config_generator
 
 logger = logging.getLogger(__name__)
@@ -300,6 +301,104 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             raise ExceptionWithStatusError(
                 constants.AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE, ops.BlockedStatus
             )
+
+    def _security_audit_snapshot(self) -> dict:
+        """Return non-secret policy and credential revision metadata for audit."""
+        policy = {
+            name: self.config.get(name)
+            for name in (
+                constants.ENABLE_USER_REGISTRATION_CONFIG,
+                constants.IDP_GROUPS_FOR_ADMIN_CONFIG,
+                constants.IDP_GROUPS_FOR_OP_CONFIG,
+                constants.IDP_GROUPS_FOR_USER_CONFIG,
+                constants.IDP_GROUPS_FOR_VIEWER_CONFIG,
+                constants.IDP_GROUPS_FOR_PUBLIC_CONFIG,
+            )
+        }
+        policy["oauth_enabled"] = self._oauth_active
+
+        credentials = {"airflow_signing_keys_revision": self.get_keys_secret().get_info().revision}
+        relation = self.model.get_relation(constants.OAUTH_ENDPOINT_NAME)
+        if relation and relation.app:
+            relation_data = relation.data[relation.app]
+            client_id = relation_data.get("client_id")
+            client_secret_id = relation_data.get("client_secret_id")
+            if client_id and client_secret_id:
+                try:
+                    secret_info = self.model.get_secret(id=client_secret_id).get_info()
+                except (ops.SecretNotFoundError, ops.ModelError):
+                    pass
+                else:
+                    credentials["hydra_client_id"] = client_id
+                    credentials["hydra_client_secret_revision"] = secret_info.revision
+
+        return {"policy": policy, "credentials": credentials}
+
+    def _audit_security_state(self, current: dict) -> None:
+        """Log security-relevant configuration or credential revision changes."""
+        state = self._peer_application_data
+        previous_raw = state.get(constants.SECURITY_AUDIT_STATE)
+        previous = json.loads(previous_raw) if previous_raw else None
+        if previous is None:
+            state[constants.SECURITY_AUDIT_STATE] = json.dumps(current, sort_keys=True)
+            return
+
+        changed_settings = security_events.changed_fields(
+            previous.get("policy", {}), current["policy"]
+        )
+        if changed_settings:
+            security_events.emit_admin_action(
+                appid=constants.APP_ID,
+                target=self.app.name,
+                action="update_security_config",
+                description="Security-related Airflow configuration changed.",
+                data={
+                    "changed_settings": changed_settings,
+                    "observed_via": "coordinator_config_reconcile",
+                    "actor_attribution": "juju_audit_log",
+                },
+            )
+
+        previous_credentials = previous.get("credentials", {})
+        current_credentials = current["credentials"]
+        previous_keys_revision = previous_credentials.get("airflow_signing_keys_revision")
+        current_keys_revision = current_credentials.get("airflow_signing_keys_revision")
+        if previous_keys_revision is not None and previous_keys_revision != current_keys_revision:
+            security_events.emit_admin_action(
+                appid=constants.APP_ID,
+                target=self.app.name,
+                action="rotate_signing_key",
+                description="Airflow API signing-key secret revision changed.",
+                data={
+                    "credential_set": "airflow_api_signing_keys",
+                    "observed_via": "juju_secret_revision",
+                    "actor_attribution": "juju_audit_log",
+                },
+            )
+
+        previous_oauth = (
+            previous_credentials.get("hydra_client_id"),
+            previous_credentials.get("hydra_client_secret_revision"),
+        )
+        current_oauth = (
+            current_credentials.get("hydra_client_id"),
+            current_credentials.get("hydra_client_secret_revision"),
+        )
+        if all(previous_oauth) and all(current_oauth) and previous_oauth != current_oauth:
+            security_events.emit_admin_action(
+                appid=constants.APP_ID,
+                target=self.app.name,
+                action="update_client_secret",
+                description="Hydra OAuth client credential changed.",
+                data={
+                    "credential_type": "hydra_client_secret",
+                    "client_id": current_oauth[0],
+                    "observed_via": "juju_secret_revision",
+                    "actor_attribution": "juju_audit_log",
+                },
+            )
+
+        state[constants.SECURITY_AUDIT_STATE] = json.dumps(current, sort_keys=True)
 
     def get_keys_secret(self) -> ops.Secret:
         """Retrieve the Juju application secret containing airflow keys."""
@@ -1013,6 +1112,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                     else {}
                 ),
             )
+            self._audit_security_state(self._security_audit_snapshot())
 
         except ExceptionWithStatusError as e:
             logger.error(e)

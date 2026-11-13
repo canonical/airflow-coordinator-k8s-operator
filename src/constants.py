@@ -108,6 +108,8 @@ INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+APP_ID = "airflow.coordinator"
+SECURITY_AUDIT_STATE = "security_audit_state"
 
 FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
 FERNET_KEY = "fernet-key"
