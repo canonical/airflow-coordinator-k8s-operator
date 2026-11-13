@@ -23,6 +23,7 @@ import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_servic
 import mergedeep
 import object_storage
 import ops
+from charmlibs.interfaces import otlp
 from ops.pebble import LayerDict
 
 import command_executor
@@ -175,6 +176,13 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             skip_creation=False,
         )
 
+        self._otlp_requirer = otlp.OtlpRequirer(
+            self,
+            relation_name=constants.SEND_OTLP_RELATION_NAME,
+            protocols=["http"],
+            telemetries=["logs", "metrics", "traces"],
+        )
+
         for event in [
             self.on.start,
             self.on.config_changed,
@@ -187,6 +195,8 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on[constants.AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_changed,
             self.on[constants.AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME].relation_broken,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_changed,
+            self.on[constants.SEND_OTLP_RELATION_NAME].relation_broken,
             self._s3_requires.on.storage_connection_info_changed,
             self._s3_requires.on.storage_connection_info_gone,
             self._oauth_requirer.on.oauth_info_changed,
@@ -778,6 +788,19 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
         return bool(provider_info and provider_info.client_id and provider_info.client_secret)
 
+    @property
+    def _otlp_endpoint(self) -> str | None:
+        """Return the validated HTTP OTLP endpoint URL from an active send-otlp relation."""
+        relation = self.model.get_relation(constants.SEND_OTLP_RELATION_NAME)
+        if not relation or not relation.active:
+            return None
+        endpoint_obj = self._otlp_requirer.endpoints.get(relation.id)
+        if not endpoint_obj or not endpoint_obj.endpoint:
+            return None
+        if not self._config_generator.parse_otlp_endpoint(endpoint_obj.endpoint):
+            return None
+        return endpoint_obj.endpoint
+
     @functools.cached_property
     def _owned_extra_config(self) -> dict:
         """The coordinator's own config contribution on top of the base template.
@@ -800,6 +823,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             (self._kubernetes_executor_config or {}),
             self._config_generator.coordinator_charm_core_config,
             self._config_generator.auth_manager_config,
+            self._config_generator.telemetry_config,
         )
 
     @property
@@ -1013,6 +1037,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
+                "otel_service": self.app.name,
             },
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
@@ -1074,6 +1099,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             return
 
         try:
+            self._otlp_requirer.publish()
             self._perform_checks()
             self._ensure_airflow_keys_generated()
             self._update_oauth_config()
@@ -1106,6 +1132,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
+                otlp_endpoint=self._otlp_endpoint,
                 **(
                     {"extra_data": self._spark_service_account_data}
                     if self._spark_service_account_data

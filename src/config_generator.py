@@ -9,6 +9,7 @@ import json
 import logging
 import pathlib
 import typing
+import urllib.parse
 
 import charms.git_integrator.v0.git as git
 import jinja2
@@ -203,6 +204,47 @@ class AirflowConfigGenerator:
 
         return {"core": {"auth_manager": constants.FAB_AUTH_MANAGER_CLASS}}
 
+    @staticmethod
+    def parse_otlp_endpoint(endpoint: str) -> tuple[str, str, bool] | None:
+        """Validate and parse an OTLP endpoint URL into (host, port, ssl_active)."""
+        try:
+            parsed = urllib.parse.urlparse(endpoint)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                logger.warning(
+                    "Ignoring invalid OTLP endpoint %r: missing valid scheme or host", endpoint
+                )
+                return None
+            port = str(parsed.port or constants.DEFAULT_OTEL_HTTP_PORT)
+        except ValueError as e:
+            logger.warning("Ignoring invalid OTLP endpoint %r: %s", endpoint, e)
+            return None
+
+        return parsed.hostname, port, parsed.scheme == "https"
+
+    @property
+    def telemetry_config(self) -> dict[str, dict[str, str]]:
+        """Return OpenTelemetry metrics and traces config when send-otlp is active."""
+        endpoint = self._charm._otlp_endpoint
+        if not endpoint:
+            return {}
+
+        parsed_endpoint = self.parse_otlp_endpoint(endpoint)
+        if not parsed_endpoint:
+            return {}
+        host, port, ssl_active = parsed_endpoint
+
+        otel_section = {
+            "otel_on": "True",
+            "otel_host": host,
+            "otel_port": port,
+            "otel_service": "{{ otel_service | default('airflow') }}",
+            "otel_ssl_active": str(ssl_active),
+        }
+        return {
+            "metrics": dict(otel_section),
+            "traces": dict(otel_section),
+        }
+
     @property
     def dag_bundle_config(self) -> dict[str, dict[str, str]]:
         """Return the DAG processor config as extra config sections.
@@ -250,12 +292,12 @@ class AirflowConfigGenerator:
 
     @property
     def _connection_configurations(self) -> dict[str, str]:
-        """S3 connection details serialized as Airflow connection URIs.
+        """S3 and authenticated Git connections serialized as Airflow connection JSON.
 
-        Each value embeds the S3 secret key, so the whole mapping is sensitive and
+        Values contain credentials, so the whole mapping is sensitive and
         is merged into ``sensitive_config_values``.
         """
-        return {
+        configurations = {
             f"connections__s3_relation_{rid}_connection": json.dumps(
                 {
                     "conn_type": "aws",
@@ -266,6 +308,37 @@ class AirflowConfigGenerator:
             )
             for rid, info in self._charm.s3_relation_connections.items()
         }
+
+        for relation_id, info in self._charm.git_relation_connections.items():
+            if not info.authentication_method:
+                continue
+
+            connection: dict[str, typing.Any] = {
+                "conn_type": "git",
+                "host": info.repository_url,
+            }
+            if info.authentication_method == git.AuthenticationMethodEnum.CREDENTIALS:
+                connection.update(
+                    login=info.credentials_username,
+                    password=info.credentials_personal_access_token,
+                )
+            elif info.authentication_method == git.AuthenticationMethodEnum.SSH:
+                connection["extra"] = {
+                    key: value
+                    for key, value in {
+                        "private_key": info.ssh_private_key,
+                        "private_key_passphrase": info.ssh_passphrase,
+                        "strict_host_key_checking": info.ssh_strict_host_key_checking,
+                        "ssh_port": str(info.ssh_port) if info.ssh_port is not None else None,
+                    }.items()
+                    if value is not None
+                }
+
+            configurations[f"connections__git_relation_{relation_id}_connection"] = json.dumps(
+                connection
+            )
+
+        return configurations
 
     def owned_keys(self, owned_extra_config: dict) -> frozenset[str]:
         """Return the lowercased ``section.option`` keys the coordinator itself sets.

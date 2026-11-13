@@ -8,7 +8,9 @@ import collections.abc
 import json
 import logging
 import pathlib
+import re
 import time
+import urllib.parse
 
 import cryptography.fernet
 import jubilant
@@ -479,6 +481,54 @@ def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
     return {_core_charm_config(juju, component) for component in AIRFLOW_COMPONENTS}
 
 
+_OTELCOL_METRIC_LINE_RE = re.compile(
+    r"^otelcol_receiver_accepted_metric_points(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$",
+    re.MULTILINE,
+)
+
+
+def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float | None:
+    """Return the HTTP OTLP accepted metric points counter from otelcol self-monitoring.
+
+    Returns None when the series has not been emitted yet (before any OTLP metric
+    point has been received by the collector).
+    """
+    out = juju.ssh("otelcol/0", "curl -s http://localhost:8888/metrics")
+    for match in _OTELCOL_METRIC_LINE_RE.finditer(out):
+        labels = match.group(1) or ""
+        if 'receiver="otlp' in labels and 'transport="http"' in labels:
+            return float(match.group(2))
+    return None
+
+
+def _assert_airflow_metric_reaches_otelcol(juju: jubilant.Juju, timeout: int = 60) -> None:
+    """Emit an Airflow metric using /airflow.cfg and poll until otelcol records it."""
+    before_points = _otelcol_accepted_metric_points(juju) or 0.0
+    deadline = time.monotonic() + timeout
+    last_points: float | None = None
+
+    while time.monotonic() < deadline:
+        juju.ssh(
+            "airflow-scheduler-mock/0",
+            "AIRFLOW_CONFIG=/airflow.cfg python3 -c "
+            '"from opentelemetry import metrics; from airflow.stats import Stats; '
+            "Stats.incr('test_metric'); "
+            "assert type(Stats.instance).__name__ == 'SafeOtelLogger', "
+            "type(Stats.instance).__name__; "
+            'metrics.get_meter_provider().force_flush()"',
+            container="workload",
+        )
+        last_points = _otelcol_accepted_metric_points(juju)
+        if last_points is not None and last_points > before_points:
+            return
+        time.sleep(5)
+
+    raise AssertionError(
+        f"Expected otelcol_receiver_accepted_metric_points > {before_points} within {timeout}s, "
+        f"got {last_points!r}"
+    )
+
+
 def _wait_for_core_configs(
     juju: jubilant.Juju,
     predicate: collections.abc.Callable[[str], bool],
@@ -784,3 +834,122 @@ def test_provider_relation_removed_restores_baseline(juju: jubilant.Juju):
 
     assert "provider_escaping" not in config
     assert f"fernet_key = {_initial_airflow_keys['core__fernet_key']}" in config
+
+
+def test_send_otlp_integration(juju: jubilant.Juju):
+    """Deploy opentelemetry-collector-k8s and verify send-otlp integration."""
+    logger.info("Deploying opentelemetry-collector-k8s")
+    juju.deploy(
+        "opentelemetry-collector-k8s",
+        app="otelcol",
+        channel="0.130/stable",
+        trust=True,
+    )
+
+    try:
+        logger.info("Integrating coordinator:send-otlp <-> otelcol:receive-otlp")
+        juju.integrate(
+            "airflow-coordinator-k8s:send-otlp",
+            "otelcol:receive-otlp",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(
+                    status,
+                    "airflow-coordinator-k8s",
+                    *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
+                )
+                and jubilant.all_blocked(status, "otelcol")
+                and jubilant.all_agents_idle(status)
+            ),
+            error=jubilant.any_error,
+            successes=3,
+            delay=5,
+        )
+
+        status = juju.status()
+        assert "send-otlp" in status.apps["airflow-coordinator-k8s"].relations
+
+        # Verify coordinator -> collector direction (published metadata & rules)
+        otelcol_unit_info = json.loads(
+            juju.cli("show-unit", "otelcol/0", "--endpoint", "receive-otlp", "--format", "json")
+        )
+        otelcol_app_data = otelcol_unit_info["otelcol/0"]["relation-info"][0]["application-data"]
+        assert "metadata" in otelcol_app_data
+        assert "rules" in otelcol_app_data
+
+        # Verify collector -> coordinator direction (received HTTP OTLP endpoint)
+        coordinator_unit_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "airflow-coordinator-k8s/0",
+                "--endpoint",
+                "send-otlp",
+                "--format",
+                "json",
+            )
+        )
+        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"]["relation-info"][
+            0
+        ]["application-data"]
+        endpoints = json.loads(coordinator_app_data["endpoints"])
+        http_endpoints = [ep["endpoint"] for ep in endpoints if ep.get("protocol") == "http"]
+        assert len(http_endpoints) == 1
+        expected_otlp_endpoint = http_endpoints[0]
+        assert expected_otlp_endpoint.startswith("http://")
+        assert expected_otlp_endpoint.endswith(":4318")
+        expected_otel_host = urllib.parse.urlparse(expected_otlp_endpoint).hostname
+        assert expected_otel_host
+
+        # Verify every core charm receives otlp_endpoint and renders its own
+        # otel_service in [metrics] and [traces] of airflow.cfg.
+        for component in AIRFLOW_COMPONENTS:
+            app_name = f"airflow-{component}-mock"
+            config = _core_charm_config(juju, component)
+            assert "[metrics]" in config
+            assert "[traces]" in config
+            assert "otel_on = True" in config
+            assert f"otel_host = {expected_otel_host}" in config
+            assert "otel_port = 4318" in config
+            assert f"otel_service = {app_name}" in config
+            assert "otel_ssl_active = False" in config
+
+            otlp_endpoint = juju.run(f"{app_name}/0", "get-otlp-endpoint").results["otlp-endpoint"]
+            assert otlp_endpoint == expected_otlp_endpoint
+
+        # Verify Airflow's OTel metric exporter initializes from the rendered airflow.cfg
+        # and delivers metric points over HTTP OTLP to the collector.
+        _assert_airflow_metric_reaches_otelcol(juju)
+
+        logger.info("Removing send-otlp integration")
+        juju.remove_relation(
+            "airflow-coordinator-k8s:send-otlp",
+            "otelcol:receive-otlp",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
+
+        status = juju.status()
+        assert "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+
+        # Verify [metrics] and [traces] are removed and otlp_endpoint is cleared on all core charms
+        _wait_for_core_configs(juju, lambda c: "[metrics]" not in c and "[traces]" not in c)
+        for component in AIRFLOW_COMPONENTS:
+            component_config = _core_charm_config(juju, component)
+            assert "[metrics]" not in component_config
+            assert "[traces]" not in component_config
+            otlp_endpoint = juju.run(f"airflow-{component}-mock/0", "get-otlp-endpoint").results[
+                "otlp-endpoint"
+            ]
+            assert otlp_endpoint == ""
+    finally:
+        logger.info("Removing opentelemetry-collector-k8s")
+        juju.remove_application("otelcol", force=True)

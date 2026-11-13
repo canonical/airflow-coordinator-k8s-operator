@@ -10,6 +10,8 @@ GIT_ENDPOINT_NAME = "git"
 OAUTH_ENDPOINT_NAME = "oauth"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME = "airflow-provider-configuration"
+SEND_OTLP_RELATION_NAME = "send-otlp"
+DEFAULT_OTEL_HTTP_PORT = 4318
 
 PEER_RELATION_NAME = "coordinator-peers"
 

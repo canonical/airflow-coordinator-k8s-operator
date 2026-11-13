@@ -964,6 +964,7 @@ class TestDagBundles:
             except (configparser.NoSectionError, configparser.NoOptionError):
                 pass
 
+    @pytest.mark.parametrize("ssh_options", [False, True])
     def test_valid_git_relations_succeed(
         self,
         context,
@@ -971,8 +972,46 @@ class TestDagBundles:
         git_unauthenticated_relation,
         git_credentials_relation,
         git_ssh_relation,
+        git_ssh_secret,
+        ssh_options,
     ):
         """Valid DAG bundles configured when multiple related git-integrators."""
+        expected_ssh_extra = {"private_key": "test-key", "strict_host_key_checking": True}
+        if ssh_options:
+            git_ssh_relation = dataclasses.replace(
+                git_ssh_relation,
+                remote_app_data={
+                    **git_ssh_relation.remote_app_data,
+                    "secret-ssh-passphrase": git_ssh_secret.id,
+                    "ssh-strict-host-key-checking": "false",
+                    "ssh-port": "2222",
+                },
+            )
+            git_ssh_secret = dataclasses.replace(
+                git_ssh_secret,
+                latest_content={
+                    "ssh-private-key": "private-key\nsecond-line",
+                    "ssh-passphrase": "passphrase",
+                },
+            )
+            state_without_s3 = dataclasses.replace(
+                state_without_s3,
+                relations=[
+                    git_ssh_relation if relation.id == git_ssh_relation.id else relation
+                    for relation in state_without_s3.relations
+                ],
+                secrets=[
+                    git_ssh_secret if secret.id == git_ssh_secret.id else secret
+                    for secret in state_without_s3.secrets
+                ],
+            )
+            expected_ssh_extra = {
+                "private_key": "private-key\nsecond-line",
+                "private_key_passphrase": "passphrase",
+                "strict_host_key_checking": False,
+                "ssh_port": "2222",
+            }
+
         state_out = context.run(context.on.start(), state_without_s3)
 
         assert state_out.unit_status == ops.ActiveStatus()
@@ -1007,6 +1046,32 @@ class TestDagBundles:
                     git_ssh_relation.id: git_ssh_relation.remote_app_data,
                 }.items()
             ]
+
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert json.loads(
+                sensitive_data[
+                    f"connections__git_relation_{git_credentials_relation.id}_connection"
+                ]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url2",
+                "login": "user",
+                "password": "test-token",
+            }
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": expected_ssh_extra,
+            }
+            assert (
+                f"connections__git_relation_{git_unauthenticated_relation.id}_connection"
+                not in sensitive_data
+            )
 
     def test_change_in_git_connection(
         self,
@@ -1284,6 +1349,16 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                in sensitive_data
+            )
+            assert f"connections__git_relation_{git_ssh_relation.id}_connection" in sensitive_data
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
@@ -1346,13 +1421,13 @@ class TestDagBundles:
 
         relations_with_removed_git_relation = [
             relation
-            for relation in state_without_s3.relations
+            for relation in state_out.relations
             if relation.endpoint != constants.GIT_ENDPOINT_NAME
         ]
         relations_with_removed_git_relation.append(git_ssh_relation)
 
         state_modified = dataclasses.replace(
-            state_without_s3,
+            state_out,
             relations=relations_with_removed_git_relation,
             containers=[workload_container],
         )
@@ -1364,6 +1439,22 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                not in sensitive_data
+            )
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": {"private_key": "test-key", "strict_host_key_checking": True},
+            }
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
@@ -1884,3 +1975,365 @@ class TestSparkServiceAccount:
                 result = charm._spark_service_account_data
 
         assert result is None
+
+
+class TestSendOtlp:
+    def test_otlp_endpoint_returns_none_without_relation(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify _otlp_endpoint returns None and charm is Active when send-otlp is absent."""
+        with context(context.on.start(), state) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
+
+    def test_otlp_endpoint_returns_http_endpoint_and_publishes_databag(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify _otlp_endpoint selects HTTP, renders OTel config, and sets otlp-endpoint."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "grpc",
+                            "endpoint": "1.2.3.4:4317",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://1.2.3.4:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(send_otlp_relation), state_with_otlp) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint == "http://1.2.3.4:4318"
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        assert "metadata" in otlp_relation_out.local_app_data
+        assert "rules" in otlp_relation_out.local_app_data
+
+        expected_otel_section = {
+            "otel_on": "True",
+            "otel_host": "1.2.3.4",
+            "otel_port": "4318",
+            "otel_service": "{{ otel_service | default('airflow') }}",
+            "otel_ssl_active": "False",
+        }
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://1.2.3.4:4318"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert dict(parsed.items("metrics")) == expected_otel_section
+            assert dict(parsed.items("traces")) == expected_otel_section
+
+        coordinator_fs = state_out.get_container(constants.WORKLOAD_CONTAINER_NAME).get_filesystem(
+            context
+        )
+        coordinator_cfg_text = (
+            coordinator_fs / constants.AIRFLOW_CONFIG_PATH.lstrip("/")
+        ).read_text()
+        coordinator_parsed = configparser.RawConfigParser()
+        coordinator_parsed.read_string(coordinator_cfg_text)
+        assert coordinator_parsed.get("metrics", "otel_service") == "airflow-coordinator-k8s"
+        assert coordinator_parsed.get("traces", "otel_service") == "airflow-coordinator-k8s"
+
+    def test_otlp_endpoint_defaults_port_to_4318_when_omitted(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify telemetry_config falls back to port 4318 when the endpoint URL omits a port."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://otelcol.airflow.svc.cluster.local",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp)
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "otelcol.airflow.svc.cluster.local"
+            assert parsed.get("metrics", "otel_port") == "4318"
+            assert parsed.get("traces", "otel_host") == "otelcol.airflow.svc.cluster.local"
+            assert parsed.get("traces", "otel_port") == "4318"
+
+    def test_https_otlp_endpoint_sets_otel_ssl_active_true(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify an https:// OTLP endpoint sets otel_ssl_active = True."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "https://otelcol.airflow.svc.cluster.local:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": False,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp)
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_ssl_active") == "True"
+            assert parsed.get("traces", "otel_ssl_active") == "True"
+
+    @pytest.mark.parametrize(
+        "malformed_endpoint",
+        [
+            "http://otelcol:invalid",
+            "http://otelcol:99999",
+            "http://[::1",
+            "otelcol:4318",
+            "http://:4318",
+        ],
+    )
+    def test_malformed_otlp_endpoint_is_ignored_without_failing_reconcile(
+        self, context, state, mock_command_executor, workload_container, malformed_endpoint
+    ):
+        """Verify malformed OTLP endpoints are caught and omitted without failing reconcile."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": malformed_endpoint,
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(send_otlp_relation), state_with_otlp) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
+
+    def test_otlp_endpoint_updated_in_place_on_relation_changed(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify an endpoint change on an active send-otlp relation updates host and port."""
+        initial_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://10.0.0.1:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_initial = dataclasses.replace(
+            state,
+            relations=[*state.relations, initial_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(initial_otlp_relation), state_initial) as manager:
+            state_after_first = manager.run()
+            assert manager.charm._otlp_endpoint == "http://10.0.0.1:4318"
+
+        for relation in state_after_first.get_relations(
+            constants.AIRFLOW_COORDINATOR_RELATION_NAME
+        ):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://10.0.0.1:4318"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "10.0.0.1"
+            assert parsed.get("metrics", "otel_port") == "4318"
+            assert parsed.get("traces", "otel_host") == "10.0.0.1"
+            assert parsed.get("traces", "otel_port") == "4318"
+
+        # Update the endpoint in-place on the same active send-otlp relation.
+        existing_otlp_rel = state_after_first.get_relation(initial_otlp_relation.id)
+        updated_otlp_relation = dataclasses.replace(
+            existing_otlp_rel,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://10.0.0.2:4319",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        relations_with_updated_otlp = [
+            updated_otlp_relation if r.id == initial_otlp_relation.id else r
+            for r in state_after_first.relations
+        ]
+        state_updated = dataclasses.replace(
+            state_after_first,
+            relations=relations_with_updated_otlp,
+            containers=[workload_container],
+        )
+
+        with context(context.on.relation_changed(updated_otlp_relation), state_updated) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint == "http://10.0.0.2:4319"
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://10.0.0.2:4319"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "10.0.0.2"
+            assert parsed.get("metrics", "otel_port") == "4319"
+            assert parsed.get("traces", "otel_host") == "10.0.0.2"
+            assert parsed.get("traces", "otel_port") == "4319"
+
+        coordinator_fs = state_out.get_container(constants.WORKLOAD_CONTAINER_NAME).get_filesystem(
+            context
+        )
+        coordinator_cfg_text = (
+            coordinator_fs / constants.AIRFLOW_CONFIG_PATH.lstrip("/")
+        ).read_text()
+        coordinator_parsed = configparser.RawConfigParser()
+        coordinator_parsed.read_string(coordinator_cfg_text)
+        assert coordinator_parsed.get("metrics", "otel_host") == "10.0.0.2"
+        assert coordinator_parsed.get("metrics", "otel_port") == "4319"
+        assert coordinator_parsed.get("traces", "otel_host") == "10.0.0.2"
+        assert coordinator_parsed.get("traces", "otel_port") == "4319"
+
+    def test_otlp_endpoint_returns_none_when_relation_broken(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify breaking send-otlp removes [metrics]/[traces] and clears otlp-endpoint."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "grpc",
+                            "endpoint": "1.2.3.4:4317",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://1.2.3.4:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+        state_after_changed = dataclasses.replace(
+            context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp),
+            containers=[workload_container],
+        )
+        send_otlp_after_changed = state_after_changed.get_relation(send_otlp_relation.id)
+
+        with context(
+            context.on.relation_broken(send_otlp_after_changed), state_after_changed
+        ) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
+
+    def test_otlp_publishes_databag_when_charm_waiting_or_blocked(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify publish() runs even when _perform_checks raises (container not ready)."""
+        container_not_ready = dataclasses.replace(workload_container, can_connect=False)
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={},
+        )
+        state_not_ready = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+            containers=[container_not_ready],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_not_ready)
+
+        assert state_out.unit_status == ops.WaitingStatus(constants.WAITING_FOR_CONTAINER_MESSAGE)
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        assert "metadata" in otlp_relation_out.local_app_data
+        assert "rules" in otlp_relation_out.local_app_data

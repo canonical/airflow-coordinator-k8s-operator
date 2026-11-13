@@ -81,6 +81,7 @@ class MockCoreCharmCharm(ops.CharmBase):
         self.framework.observe(
             self.on.get_all_validation_failures_action, self._get_all_validation_failures
         )
+        self.framework.observe(self.on.get_otlp_endpoint_action, self._get_otlp_endpoint)
 
         self.framework.observe(self.on.clean_files_action, self._clean_files)
 
@@ -200,6 +201,14 @@ class MockCoreCharmCharm(ops.CharmBase):
         event.set_results(
             {
                 "all-validation-failures": self.config_requirer.airflow_core_validation_failures,
+            },
+        )
+
+    def _get_otlp_endpoint(self, event: ops.ActionEvent) -> None:
+        """Retrieve the OTLP endpoint shared by the coordinator."""
+        event.set_results(
+            {
+                "otlp-endpoint": self.config_requirer.otlp_endpoint or "",
             },
         )
 
