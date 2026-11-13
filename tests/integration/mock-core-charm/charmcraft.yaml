@@ -86,5 +86,7 @@ actions:
     description: Get this component's validation failure messages.
   get-all-validation-failures:
     description: Get validation failure messages for all Airflow core components.
+  get-otlp-endpoint:
+    description: Get the OTLP endpoint shared in the Airflow Coordinator relation.
   clean-files:
     description: Clean the airflow config and k8s executor pod spec files.

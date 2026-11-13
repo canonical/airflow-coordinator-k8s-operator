@@ -691,12 +691,16 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
 
     @property
     def _otlp_endpoint(self) -> str | None:
-        """Return the HTTP OTLP endpoint URL if provided over an active send-otlp relation."""
+        """Return the validated HTTP OTLP endpoint URL from an active send-otlp relation."""
         relation = self.model.get_relation(constants.SEND_OTLP_RELATION_NAME)
         if not relation or not relation.active:
             return None
-        endpoint = self._otlp_requirer.endpoints.get(relation.id)
-        return endpoint.endpoint if endpoint else None
+        endpoint_obj = self._otlp_requirer.endpoints.get(relation.id)
+        if not endpoint_obj or not endpoint_obj.endpoint:
+            return None
+        if not self._config_generator.parse_otlp_endpoint(endpoint_obj.endpoint):
+            return None
+        return endpoint_obj.endpoint
 
     @functools.cached_property
     def _owned_extra_config(self) -> dict:
@@ -720,6 +724,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             (self._kubernetes_executor_config or {}),
             self._config_generator.coordinator_charm_core_config,
             self._config_generator.auth_manager_config,
+            self._config_generator.telemetry_config,
         )
 
     @property
@@ -933,6 +938,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 **self._provider_sensitive_data,
                 **self._config_generator.sensitive_config_values,
                 "render_sensitive_data": True,
+                "otel_service": self.app.name,
             },
             user=constants.WORKLOAD_USER,
             group=constants.WORKLOAD_GROUP,
@@ -1027,6 +1033,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 webserver_config_template=self._webserver_config_generator.webserver_config_template,
                 sensitive_data=sensitive_data,
                 tls_ca_chains=self.s3_tls_ca_chains,
+                otlp_endpoint=self._otlp_endpoint,
                 **(
                     {"extra_data": self._spark_service_account_data}
                     if self._spark_service_account_data
