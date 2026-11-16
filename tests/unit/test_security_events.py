@@ -55,7 +55,7 @@ def test_policy_and_credential_changes_emit_redacted_events(caplog):
     with caplog.at_level(logging.INFO, logger="security_events"):
         _audit(state, current)
 
-    events = [json.loads(record.getMessage()) for record in caplog.records]
+    events = [json.loads(record.getMessage())["owasp_event"] for record in caplog.records]
     assert {
         event["event"]: event["data"]
         for event in events
@@ -77,4 +77,9 @@ def test_policy_and_credential_changes_emit_redacted_events(caplog):
             "actor_attribution": "juju_audit_log",
         },
     }
+    assert all(event["type"] == "security" for event in events)
+    assert all(event["level"] == "WARN" for event in events)
+    assert all(event["actor"] == "unattributed" for event in events)
+    assert all(event["target"] == "airflow-coordinator" for event in events)
+    assert all("action" not in event and "outcome" not in event for event in events)
     assert json.loads(state["security_audit_state"]) == current

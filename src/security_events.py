@@ -5,41 +5,29 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from owasp_logger import OWASPLogger
+
 logger = logging.getLogger(__name__)
-
-_LEVELS = {
-    "INFO": logging.INFO,
-    "WARN": logging.WARNING,
-    "CRITICAL": logging.CRITICAL,
-}
 UNATTRIBUTED_ACTOR = "unattributed"
+_OWASP_EVENT_KEY = "owasp_event"
 
 
-def emit_security_event(
-    *,
-    appid: str,
-    event_type: str,
-    parameters: tuple[str, ...],
-    level: str,
-    actor: str,
-    target: str,
-    description: str,
-    data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Write a security event as one JSON record and return its payload."""
-    normalized_level = level.upper()
-    payload = {
-        "datetime": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-        "appid": appid,
-        "event": event_type + (":" + ",".join(parameters) if parameters else ""),
-        "level": normalized_level,
-        "actor": actor,
-        "target": target,
-        "description": description,
-        "data": data or {},
-    }
-    logger.log(_LEVELS[normalized_level], json.dumps(payload, separators=(",", ":")))
-    return payload
+class _ContextLogger(logging.LoggerAdapter):
+    """Add required Canonical context to an OWASP logger event."""
+
+    def process(self, message: str, kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        extra = dict(kwargs.get("extra") or {})
+        event = extra.get(_OWASP_EVENT_KEY)
+        if event is not None:
+            event = dict(event)
+            event.update(self.extra)
+            event["datetime"] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            if event.get("level") == "WARNING":
+                event["level"] = "WARN"
+            extra[_OWASP_EVENT_KEY] = event
+            kwargs["extra"] = extra
+            message = json.dumps({_OWASP_EVENT_KEY: event}, separators=(",", ":"))
+        return message, kwargs
 
 
 def emit_admin_action(
@@ -49,18 +37,18 @@ def emit_admin_action(
     action: str,
     description: str,
     data: dict[str, Any],
-) -> dict[str, Any]:
-    """Emit an administrative event with consistent severity and attribution."""
-    return emit_security_event(
-        appid=appid,
-        event_type="authz_admin",
-        parameters=(UNATTRIBUTED_ACTOR, action),
-        level="WARN",
-        actor=UNATTRIBUTED_ACTOR,
-        target=target,
-        description=description,
-        data=data,
+) -> None:
+    """Emit an OWASP event and enrich its nested event data with product context."""
+    context_logger = _ContextLogger(
+        logger,
+        {
+            "target": target,
+            "actor": UNATTRIBUTED_ACTOR,
+            "data": data,
+        },
     )
+    owasp_logger = OWASPLogger(appid=appid, logger=context_logger)
+    owasp_logger.authz_admin(UNATTRIBUTED_ACTOR, action, description=description)
 
 
 def changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
