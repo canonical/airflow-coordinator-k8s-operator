@@ -128,10 +128,15 @@ class AirflowAPIServerProvides(ops.Object):
 
         The URL should include scheme, authority, and path prefix as assigned
         by the ingress provider (e.g. ``https://example.com/airflow``).
+
+        Any trailing slash is stripped before storing: in subdomain mode the
+        ingress library normalises the URL to end in ``/`` (pydantic's
+        ``AnyHttpUrl``), which would otherwise produce double slashes when the
+        requirer appends its own path (e.g. ``.../oauth-authorized/hydra``).
         """
         if not self._relation or not self._charm.unit.is_leader():
             return
-        self._relation.data[self._charm.app][INGRESS_URL_KEY] = url
+        self._relation.data[self._charm.app][INGRESS_URL_KEY] = url.rstrip("/")
 
     def clear_ingress_url(self) -> None:
         """Remove the ingress URL from the relation."""
