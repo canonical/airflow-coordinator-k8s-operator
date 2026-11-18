@@ -35,7 +35,9 @@ class AirflowConfigGenerator:
         """
         ingress_url = self._charm._api_server_requires.api_server_ingress_url
         if ingress_url:
-            return ingress_url
+            # Strip any trailing slash: Traefik always appends one in subdomain
+            # mode, and this value arrives verbatim over the relation databag.
+            return ingress_url.rstrip("/")
 
         host = self._charm._api_server_requires.api_server_host
         port = self._charm._api_server_requires.api_server_port
