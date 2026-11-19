@@ -89,6 +89,17 @@ def _sanitise_provider_value(value: str, known_placeholders: set[str]) -> tuple[
     return "".join(parts), escaped
 
 
+def _secret_unique_id(secret_id: str | None) -> str | None:
+    """Return the globally-unique part of a secret URI, as ``ops.Secret.unique_identifier`` does.
+
+    Secret URIs can arrive as ``secret:<id>`` or ``secret://<model-uuid>/<id>``,
+    so comparing raw strings would report the same secret as changed.
+    """
+    if not secret_id:
+        return None
+    return secret_id.rsplit("/", 1)[-1].removeprefix("secret:")
+
+
 @dataclasses.dataclass(frozen=True)
 class _ProviderPayload:
     """Validated provider configuration, ready to merge into the airflow config.
@@ -187,7 +198,6 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self.on.start,
             self.on.config_changed,
             self.on.update_status,
-            self.on.secret_changed,
             self.on[constants.WORKLOAD_CONTAINER_NAME].pebble_ready,
             self._database_requires.on.database_created,
             self._database_requires.on.endpoints_changed,
@@ -206,6 +216,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             self._spark_service_account_requirer.on.properties_changed,
         ]:
             self.framework.observe(event, self._reconcile)
+        self.framework.observe(self.on.secret_changed, self._on_secret_changed)
 
     @property
     def _all_database_connection_details_present(self) -> bool:
@@ -312,8 +323,23 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 constants.AIRFLOW_KEYS_SECRET_ADD_ERROR_MESSAGE, ops.BlockedStatus
             )
 
+    @property
+    def _hydra_client_credential_ids(self) -> tuple[str | None, str | None]:
+        """Return the Hydra ``client_id`` and ``client_secret_id`` from the oauth relation."""
+        relation = self.model.get_relation(constants.OAUTH_ENDPOINT_NAME)
+        if not relation or not relation.app:
+            return None, None
+        relation_data = relation.data[relation.app]
+        return relation_data.get("client_id"), relation_data.get("client_secret_id")
+
     def _security_audit_snapshot(self) -> dict:
-        """Return non-secret policy and credential revision metadata for audit."""
+        """Return non-secret policy and credential metadata for audit.
+
+        Revisions are only readable for secrets this charm owns. For consumed
+        secrets (the user's fernet key secret and Hydra's client secret) only the
+        secret ID is recorded here; new revisions are audited in
+        :meth:`_on_secret_changed`.
+        """
         policy = {
             name: self.config.get(name)
             for name in (
@@ -327,25 +353,77 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
         }
         policy["oauth_enabled"] = self._oauth_active
 
-        credentials = {"airflow_signing_keys_revision": self.get_keys_secret().get_info().revision}
-        relation = self.model.get_relation(constants.OAUTH_ENDPOINT_NAME)
-        if relation and relation.app:
-            relation_data = relation.data[relation.app]
-            client_id = relation_data.get("client_id")
-            client_secret_id = relation_data.get("client_secret_id")
-            if client_id and client_secret_id:
-                try:
-                    secret_info = self.model.get_secret(id=client_secret_id).get_info()
-                except (ops.SecretNotFoundError, ops.ModelError):
-                    pass
-                else:
-                    credentials["hydra_client_id"] = client_id
-                    credentials["hydra_client_secret_revision"] = secret_info.revision
+        credentials = {
+            "airflow_signing_keys_revision": self.get_keys_secret().get_info().revision,
+            "fernet_key_secret_id": self.config.get(constants.FERNET_KEY_SECRET_CONFIG),
+        }
+        client_id, client_secret_id = self._hydra_client_credential_ids
+        if client_id and client_secret_id:
+            credentials["hydra_client_id"] = client_id
+            credentials["hydra_client_secret_id"] = client_secret_id
 
         return {"policy": policy, "credentials": credentials}
 
+    def _emit_fernet_key_changed(self, observed_via: str) -> None:
+        security_events.emit_admin_action(
+            appid=constants.APP_ID,
+            target=self.app.name,
+            action="rotate_fernet_key",
+            description="Airflow fernet key secret changed.",
+            data={
+                "credential_set": "airflow_fernet_key",
+                "observed_via": observed_via,
+                "actor_attribution": "juju_audit_log",
+            },
+        )
+
+    def _emit_client_secret_changed(self, client_id: str, observed_via: str) -> None:
+        security_events.emit_admin_action(
+            appid=constants.APP_ID,
+            target=self.app.name,
+            action="update_client_secret",
+            description="Hydra OAuth client credential changed.",
+            data={
+                "credential_type": "hydra_client_secret",
+                "client_id": client_id,
+                "observed_via": observed_via,
+                "actor_attribution": "juju_audit_log",
+            },
+        )
+
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Track and audit new revisions of consumed credential secrets, then reconcile.
+
+        Juju only tells consumers that a new revision exists; until the charm
+        refreshes, ``get_content()`` keeps returning the tracked (old) revision.
+        Every unit refreshes so a future leader renders the current value, but
+        only the leader emits the audit event, matching :meth:`_reconcile`.
+        """
+        changed_id = event.secret.unique_identifier
+        client_id, client_secret_id = self._hydra_client_credential_ids
+        if changed_id and changed_id == _secret_unique_id(
+            self.config.get(constants.FERNET_KEY_SECRET_CONFIG)
+        ):
+            if self._track_latest_revision(event.secret) and self.unit.is_leader():
+                self._emit_fernet_key_changed(observed_via="juju_secret_changed")
+        elif client_id and changed_id and changed_id == _secret_unique_id(client_secret_id):
+            if self._track_latest_revision(event.secret) and self.unit.is_leader():
+                self._emit_client_secret_changed(client_id, observed_via="juju_secret_changed")
+
+        self._reconcile(event)
+
+    @staticmethod
+    def _track_latest_revision(secret: ops.Secret) -> bool:
+        """Move a consumed secret to its latest revision; return whether that succeeded."""
+        try:
+            secret.get_content(refresh=True)
+        except (ops.SecretNotFoundError, ops.ModelError):
+            logger.exception("Could not refresh changed secret %s", secret.unique_identifier)
+            return False
+        return True
+
     def _audit_security_state(self, current: dict) -> None:
-        """Log security-relevant configuration or credential revision changes."""
+        """Log security-relevant configuration or credential changes."""
         state = self._peer_application_data
         previous_raw = state.get(constants.SECURITY_AUDIT_STATE)
         previous = json.loads(previous_raw) if previous_raw else None
@@ -386,27 +464,21 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                 },
             )
 
+        previous_fernet_id = _secret_unique_id(previous_credentials.get("fernet_key_secret_id"))
+        current_fernet_id = _secret_unique_id(current_credentials.get("fernet_key_secret_id"))
+        if previous_fernet_id and current_fernet_id and previous_fernet_id != current_fernet_id:
+            self._emit_fernet_key_changed(observed_via="charm_config")
+
         previous_oauth = (
             previous_credentials.get("hydra_client_id"),
-            previous_credentials.get("hydra_client_secret_revision"),
+            _secret_unique_id(previous_credentials.get("hydra_client_secret_id")),
         )
         current_oauth = (
             current_credentials.get("hydra_client_id"),
-            current_credentials.get("hydra_client_secret_revision"),
+            _secret_unique_id(current_credentials.get("hydra_client_secret_id")),
         )
         if all(previous_oauth) and all(current_oauth) and previous_oauth != current_oauth:
-            security_events.emit_admin_action(
-                appid=constants.APP_ID,
-                target=self.app.name,
-                action="update_client_secret",
-                description="Hydra OAuth client credential changed.",
-                data={
-                    "credential_type": "hydra_client_secret",
-                    "client_id": current_oauth[0],
-                    "observed_via": "juju_secret_revision",
-                    "actor_attribution": "juju_audit_log",
-                },
-            )
+            self._emit_client_secret_changed(current_oauth[0], observed_via="oauth_relation_data")
 
         state[constants.SECURITY_AUDIT_STATE] = json.dumps(current, sort_keys=True)
 
