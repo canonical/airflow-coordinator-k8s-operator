@@ -12,6 +12,7 @@ import re
 import time
 import urllib.parse
 
+import cosl
 import cryptography.fernet
 import jubilant
 import yaml
@@ -950,6 +951,121 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "otlp-endpoint"
             ]
             assert otlp_endpoint == ""
+
+        # Verify grafana-dashboards integration, removal, and re-integration with otelcol
+        logger.info(
+            "Integrating coordinator:grafana-dashboards <-> otelcol:grafana-dashboards-consumer"
+        )
+        juju.integrate(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(
+                    status,
+                    "airflow-coordinator-k8s",
+                    *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
+                )
+                and jubilant.all_blocked(status, "otelcol")
+                and jubilant.all_agents_idle(status)
+            ),
+            error=jubilant.any_error,
+            successes=3,
+            delay=5,
+        )
+
+        status = juju.status()
+        assert "grafana-dashboards" in status.apps["airflow-coordinator-k8s"].relations
+
+        otelcol_dashboards_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "otelcol/0",
+                "--endpoint",
+                "grafana-dashboards-consumer",
+                "--format",
+                "json",
+            )
+        )
+        otelcol_dashboards_app_data = otelcol_dashboards_info["otelcol/0"]["relation-info"][0][
+            "application-data"
+        ]
+        assert "dashboards" in otelcol_dashboards_app_data
+        dashboards_payload = json.loads(otelcol_dashboards_app_data["dashboards"])
+        assert "file:apache-airflow-overview" in dashboards_payload["templates"]
+        template_entry = dashboards_payload["templates"]["file:apache-airflow-overview"]
+        assert template_entry["charm"] == "airflow-coordinator-k8s"
+        decompressed_dashboard = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
+        assert decompressed_dashboard["title"] == "Apache Airflow overview"
+
+        logger.info("Removing grafana-dashboards integration")
+        juju.remove_relation(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
+
+        logger.info(
+            "Re-integrating coordinator:grafana-dashboards <-> otelcol:grafana-dashboards-consumer"
+        )
+        juju.integrate(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_blocked(status, "otelcol")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+            successes=3,
+            delay=5,
+        )
+
+        reintegrated_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "otelcol/0",
+                "--endpoint",
+                "grafana-dashboards-consumer",
+                "--format",
+                "json",
+            )
+        )
+        reintegrated_app_data = reintegrated_info["otelcol/0"]["relation-info"][0][
+            "application-data"
+        ]
+        assert "dashboards" in reintegrated_app_data
+        assert (
+            "file:apache-airflow-overview"
+            in json.loads(reintegrated_app_data["dashboards"])["templates"]
+        )
+
+        juju.remove_relation(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
     finally:
         logger.info("Removing opentelemetry-collector-k8s")
         juju.remove_application("otelcol", force=True)
