@@ -132,6 +132,7 @@ IDP_GROUPS_CONFIGS = [
 # registered with the provider must match this exactly, otherwise the
 # authorization request is rejected as unregistered.
 OAUTH_REDIRECT_PATH = "auth/oauth-authorized/hydra"
+OAUTH_SCOPE = "openid email profile offline"
 
 OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE = "Failed to update OAuth client config"
 WAITING_FOR_OAUTH_PROVIDER_INFO_MESSAGE = "Waiting for OAuth provider info from relation"

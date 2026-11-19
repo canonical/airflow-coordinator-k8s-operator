@@ -956,7 +956,7 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
                             f"{self._config_generator._api_server_base_url}"
                             f"/{constants.OAUTH_REDIRECT_PATH}"
                         ),
-                        scope="openid email profile offline",
+                        scope=constants.OAUTH_SCOPE,
                         grant_types=["authorization_code", "refresh_token"],
                     )
                 )

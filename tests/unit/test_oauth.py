@@ -125,6 +125,30 @@ class TestOAuth:
         assert "{{ webserver_config__client_secret }}" in webserver_template
         assert OAUTH_CLIENT_SECRET not in webserver_template
 
+    def test_oauth_requests_exactly_the_registered_scope(
+        self,
+        context,
+        state_with_oauth,
+        oauth_relation,
+        mock_get_provider_info,
+    ):
+        """A provider-advertised scope such as phone must not reach the Airflow config."""
+        state_out = context.run(context.on.config_changed(), state_with_oauth)
+
+        registered_scope = state_out.get_relation(oauth_relation.id).local_app_data["scope"]
+        assert registered_scope == "openid email profile offline"
+
+        core_relations = state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME)
+        assert core_relations
+        for relation in core_relations:
+            template = relation.local_app_data["webserver-config-template"]
+            scope_lines = [
+                line.strip()
+                for line in template.splitlines()
+                if line.lstrip().startswith('"scope":')
+            ]
+            assert scope_lines == [f'"scope": "{registered_scope}",']
+
     def test_oauth_includes_client_secret_in_sensitive_data(
         self,
         context,
