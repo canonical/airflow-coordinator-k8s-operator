@@ -127,6 +127,12 @@ IDP_GROUPS_CONFIGS = [
     IDP_GROUPS_FOR_PUBLIC_CONFIG,
 ]
 
+# Airflow 3's FAB auth manager mounts its views under `/auth`, so FAB builds
+# its OAuth callback as `/auth/oauth-authorized/<provider>`. The redirect_uri
+# registered with the provider must match this exactly, otherwise the
+# authorization request is rejected as unregistered.
+OAUTH_REDIRECT_PATH = "auth/oauth-authorized/hydra"
+
 OAUTH_CLIENT_CONFIG_UPDATE_FAILED_MESSAGE = "Failed to update OAuth client config"
 WAITING_FOR_OAUTH_PROVIDER_INFO_MESSAGE = "Waiting for OAuth provider info from relation"
 INVALID_OAUTH_RELATION_MESSAGE = "Invalid OAuth relation data"
