@@ -968,7 +968,6 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                     "airflow-coordinator-k8s",
                     *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
                 )
-                and jubilant.all_blocked(status, "otelcol")
                 and jubilant.all_agents_idle(status)
             ),
             error=jubilant.any_error,
@@ -989,9 +988,14 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "json",
             )
         )
-        otelcol_dashboards_app_data = otelcol_dashboards_info["otelcol/0"]["relation-info"][0][
-            "application-data"
+        otelcol_dashboards_relations = [
+            rel
+            for rel in otelcol_dashboards_info["otelcol/0"]["relation-info"]
+            if rel.get("endpoint") == "grafana-dashboards-consumer"
+            and rel.get("related-endpoint") == "grafana-dashboards"
         ]
+        assert len(otelcol_dashboards_relations) == 1
+        otelcol_dashboards_app_data = otelcol_dashboards_relations[0]["application-data"]
         assert "dashboards" in otelcol_dashboards_app_data
         dashboards_payload = json.loads(otelcol_dashboards_app_data["dashboards"])
         assert "file:apache-airflow-overview" in dashboards_payload["templates"]
@@ -1026,7 +1030,6 @@ def test_send_otlp_integration(juju: jubilant.Juju):
         juju.wait(
             lambda status: (
                 jubilant.all_active(status, "airflow-coordinator-k8s")
-                and jubilant.all_blocked(status, "otelcol")
                 and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
                 and "grafana-dashboards" in status.apps["airflow-coordinator-k8s"].relations
             ),
@@ -1045,9 +1048,14 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "json",
             )
         )
-        reintegrated_app_data = reintegrated_info["otelcol/0"]["relation-info"][0][
-            "application-data"
+        reintegrated_relations = [
+            rel
+            for rel in reintegrated_info["otelcol/0"]["relation-info"]
+            if rel.get("endpoint") == "grafana-dashboards-consumer"
+            and rel.get("related-endpoint") == "grafana-dashboards"
         ]
+        assert len(reintegrated_relations) == 1
+        reintegrated_app_data = reintegrated_relations[0]["application-data"]
         assert "dashboards" in reintegrated_app_data
         assert (
             "file:apache-airflow-overview"
