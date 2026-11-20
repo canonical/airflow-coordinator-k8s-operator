@@ -13,6 +13,7 @@ dependencies = [
     "ops>=3,<4",
     "pydantic>=1.0",
     "Jinja2>=3.1.6",
+    "owasp-logger>=0.1.6,<0.2.0",
     "charmlibs-interfaces-otlp>=0.5.0,<1.0.0",
     "cosl>=1.0.0,<2.0.0",
     "object-storage-charmlib>=0.1.0, <1.0.0",
