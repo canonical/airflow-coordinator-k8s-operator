@@ -476,6 +476,58 @@ class TestAirflowCoordinatorCoreRequires:
             level=log_level, message=f"§Requirer reacting to event: {event}"
         )
 
+    @pytest.mark.parametrize(
+        ("before", "after", "expected_updates"),
+        [
+            pytest.param(None, "new template", 1, id="added"),
+            pytest.param("old template", "new template", 1, id="changed"),
+            pytest.param("old template", None, 1, id="removed"),
+            pytest.param("old template", "old template", 0, id="unchanged"),
+        ],
+    )
+    def test_webserver_template_only_change_notifies_core(
+        self,
+        application_context,
+        application_state,
+        application_airflow_coordinator_relation,
+        before,
+        after,
+        expected_updates,
+    ):
+        """An isolated template change triggers the callback once, but unchanged data does not."""
+        template_key = "webserver-config-template"
+        relation_data = dict(application_airflow_coordinator_relation.remote_app_data)
+        relation_data.pop(template_key)
+        initial_relation = dataclasses.replace(
+            application_airflow_coordinator_relation,
+            remote_app_data=(
+                relation_data if before is None else {**relation_data, template_key: before}
+            ),
+        )
+        initial_state = dataclasses.replace(application_state, relations=[initial_relation])
+        state_out = application_context.run(
+            application_context.on.relation_changed(initial_relation),
+            initial_state,
+        )
+        updated_relation = dataclasses.replace(
+            state_out.get_relation(initial_relation.id),
+            remote_app_data=(
+                relation_data if after is None else {**relation_data, template_key: after}
+            ),
+        )
+        updated_state = dataclasses.replace(state_out, relations=[updated_relation])
+
+        updated_log = self.get_juju_log_line("INFO", airflow_coordinator.AirflowConfigUpdatedEvent)
+        previous_updates = application_context.juju_log.count(updated_log)
+        application_context.run(
+            application_context.on.relation_changed(updated_relation),
+            updated_state,
+        )
+
+        assert (
+            application_context.juju_log.count(updated_log) - previous_updates == expected_updates
+        )
+
     def test_airflow_core_validation_failures(
         self,
         application_context,
