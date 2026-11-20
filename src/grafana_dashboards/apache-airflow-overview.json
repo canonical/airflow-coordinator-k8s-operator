@@ -1,0 +1,1036 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": {
+    "list": []
+  },
+  "description": "Apache Airflow overview dashboard for Charmed Airflow",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "hideControls": false,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "Heartbeat rate of the Airflow Scheduler, DAG Processor, and Triggerer components.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(airflow_scheduler_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(airflow_dag_processor_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "rate(airflow_triggerer_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
+          "refId": "C"
+        }
+      ],
+      "title": "Component heartbeats",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The number of errors from trying to parse DAG files in an Apache Airflow system.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_dag_processing_import_errors{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "DAG file parsing errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The overall task instances failures for an Apache Airflow system.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "sum by (job, juju_model) (increase(airflow_ti_failures{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
+          "format": "time_series",
+          "interval": "1m",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Task failures",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 11,
+      "targets": [],
+      "title": "Scheduler details",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The delay between scheduled DAG run start date and actual DAG run start date (OTel gauge in milliseconds).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 60000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_dagrun_schedule_delay{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "interval": "1m",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} - {{dag_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "DAG schedule delay",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The number of current tasks that the scheduler is handling in the Apache Airflow system.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_scheduler_tasks_executable{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} - executable",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_scheduler_tasks_starving{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} - starving",
+          "refId": "B"
+        }
+      ],
+      "title": "Scheduler tasks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The number of current tasks that the executors are handling in the Apache Airflow system.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_executor_running_tasks{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} - running",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_executor_queued_tasks{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} - queued",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_executor_open_slots{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} / {{job}} - open",
+          "refId": "C"
+        }
+      ],
+      "title": "Executor tasks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "The number of current task slots that the pools are handling in the Apache Airflow system.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_pool_running_slots{job=~\"$job\", pool_name=~\"$pool_name\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} - {{pool_name}} - running",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_pool_queued_slots{job=~\"$job\", pool_name=~\"$pool_name\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} - {{pool_name}} - queued",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_pool_starving_tasks{job=~\"$job\", pool_name=~\"$pool_name\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} - {{pool_name}} - starving",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "expr": "airflow_pool_open_slots{job=~\"$job\", pool_name=~\"$pool_name\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{juju_model}} - {{pool_name}} - open",
+          "refId": "D"
+        }
+      ],
+      "title": "Pool task slots",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${lokids}"
+      },
+      "description": "Stdout logs from the Airflow core components (scheduler, dag-processor, triggerer, api-server).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 16,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": false,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "${lokids}"
+          },
+          "editorMode": "code",
+          "expr": "{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"} |= ``",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Airflow component logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "1m",
+  "rows": [],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "apache-airflow-mixin"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Prometheus datasource",
+        "name": "prometheusds",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Loki datasource",
+        "name": "lokids",
+        "options": [],
+        "query": "loki",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\"}, juju_model)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju model",
+        "multi": true,
+        "name": "juju_model",
+        "options": [],
+        "query": {
+          "query": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\"}, juju_model)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\"}, juju_model_uuid)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju model uuid",
+        "multi": true,
+        "name": "juju_model_uuid",
+        "options": [],
+        "query": {
+          "query": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\"}, juju_model_uuid)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\"}, juju_application)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju application",
+        "multi": true,
+        "name": "juju_application",
+        "options": [],
+        "query": {
+          "query": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\"}, juju_application)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "definition": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\"}, juju_unit)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Juju unit",
+        "multi": true,
+        "name": "juju_unit",
+        "options": [],
+        "query": {
+          "query": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\"}, juju_unit)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".+",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Job",
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": "label_values(target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}, job)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".+",
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${prometheusds}"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pool",
+        "multi": true,
+        "name": "pool_name",
+        "options": [],
+        "query": "label_values(airflow_pool_open_slots{job=~\"$job\"}, pool_name)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 0,
+        "tagValuesQuery": "",
+        "tags": [],
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h",
+      "2h",
+      "1d"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
+  },
+  "timezone": "default",
+  "title": "Apache Airflow overview",
+  "uid": "apache-airflow-overview",
+  "version": 0
+}
