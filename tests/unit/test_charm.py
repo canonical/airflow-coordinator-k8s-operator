@@ -1903,6 +1903,123 @@ def test_base_url_falls_back_to_internal_url_without_ingress(
         assert "http://test-host:test-port" in config_template
 
 
+def test_base_url_uses_ingress_url_when_available(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    """Verify base_url uses the external ingress_url (subdomain routing).
+
+    When the api-server shares a full ingress_url it must be used instead of
+    the internal host/port, and any trailing slash (which Traefik always adds
+    in subdomain mode) must be stripped.
+    """
+    ingress_relation = dataclasses.replace(
+        airflow_api_server_requires_relation,
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+            "ingress_url": "https://airflow.example.com/",
+        },
+    )
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    all_required_relations.append(ingress_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        config_template = relation.local_app_data.get("config-template", "")
+        assert "base_url = https://airflow.example.com\n" in config_template
+        assert "https://airflow.example.com/" not in config_template
+        assert "http://test-host:test-port" not in config_template
+
+
+def test_base_url_prefers_ingress_url_over_ingress_path(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    """Verify ingress_url wins when both ingress_url and ingress_path are set."""
+    ingress_relation = dataclasses.replace(
+        airflow_api_server_requires_relation,
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+            "ingress_path": "test-airflow-api-server-k8s",
+            "ingress_url": "https://airflow.example.com/",
+        },
+    )
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    all_required_relations.append(ingress_relation)
+
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        config_template = relation.local_app_data.get("config-template", "")
+        assert "base_url = https://airflow.example.com\n" in config_template
+        assert "test-airflow-api-server-k8s" not in config_template
+
+
+def test_base_url_falls_back_after_ingress_url_removed(
+    context,
+    state,
+    all_required_relations,
+    airflow_api_server_requires_relation,
+    mock_command_executor,
+):
+    """Verify base_url reverts to internal host:port once ingress_url is gone.
+
+    Simulates removing the ingress relation after an external URL had been
+    configured: the regenerated base_url must fall back to the internal host
+    and port instead of retaining the previous external URL.
+    """
+    external_relation = dataclasses.replace(
+        airflow_api_server_requires_relation,
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+            "ingress_url": "https://airflow.example.com/",
+        },
+    )
+    all_required_relations.remove(airflow_api_server_requires_relation)
+    all_required_relations.append(external_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+    for relation in state_out.get_relations("airflow-coordinator"):
+        config_template = relation.local_app_data.get("config-template", "")
+        assert "base_url = https://airflow.example.com\n" in config_template
+
+    internal_relation = dataclasses.replace(
+        external_relation,
+        remote_app_data={
+            "host": "test-host",
+            "port": "test-port",
+        },
+    )
+    all_required_relations.remove(external_relation)
+    all_required_relations.append(internal_relation)
+    state = dataclasses.replace(state, relations=all_required_relations)
+
+    state_out = context.run(context.on.start(), state)
+    assert state_out.unit_status == ops.ActiveStatus()
+
+    for relation in state_out.get_relations("airflow-coordinator"):
+        config_template = relation.local_app_data.get("config-template", "")
+        assert "base_url = http://test-host:test-port\n" in config_template
+        assert "airflow.example.com" not in config_template
+
+
 class TestPebbleLayer:
     def test_pebble_layer_structure(
         self, context, state, mock_command_executor, workload_container
