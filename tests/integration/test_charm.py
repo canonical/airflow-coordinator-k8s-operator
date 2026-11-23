@@ -951,8 +951,25 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "otlp-endpoint"
             ]
             assert otlp_endpoint == ""
+    except Exception:
+        logger.info("Removing opentelemetry-collector-k8s after send-otlp failure")
+        juju.remove_application("otelcol", force=True)
+        raise
 
-        # Verify grafana-dashboards integration, removal, and re-integration with otelcol
+
+def test_grafana_dashboards_integration(juju: jubilant.Juju):
+    """Verify grafana-dashboards integration, dashboard structure, removal, and re-integration."""
+    status = juju.status()
+    if "otelcol" not in status.apps:
+        logger.info("Deploying opentelemetry-collector-k8s")
+        juju.deploy(
+            "opentelemetry-collector-k8s",
+            app="otelcol",
+            channel="0.130/stable",
+            trust=True,
+        )
+
+    try:
         logger.info(
             "Integrating coordinator:grafana-dashboards <-> otelcol:grafana-dashboards-consumer"
         )
@@ -1003,6 +1020,54 @@ def test_send_otlp_integration(juju: jubilant.Juju):
         assert template_entry["charm"] == "airflow-coordinator-k8s"
         decompressed_dashboard = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
         assert decompressed_dashboard["title"] == "Apache Airflow overview"
+
+        data_panels = [
+            panel for panel in decompressed_dashboard["panels"] if panel.get("type") != "row"
+        ]
+        assert [panel["title"] for panel in data_panels] == [
+            "Component heartbeats",
+            "DAG file parsing errors",
+            "Task failures",
+            "DAG schedule delay",
+            "Scheduler tasks",
+            "Executor tasks",
+            "Pool task slots",
+            "Airflow component logs",
+        ]
+        for panel in data_panels:
+            expected_ds_uid = (
+                "${lokids}" if panel["title"] == "Airflow component logs" else "${prometheusds}"
+            )
+            assert panel["datasource"]["uid"] == expected_ds_uid
+            assert panel.get("targets"), f"Panel {panel['title']} has no targets"
+            for target in panel["targets"]:
+                assert target["datasource"]["uid"] == expected_ds_uid
+                assert target.get("expr"), f"Panel {panel['title']} has an empty target expr"
+
+        templating_vars = {
+            var["name"]: var for var in decompressed_dashboard["templating"]["list"]
+        }
+        assert set(templating_vars) == {
+            "prometheusds",
+            "lokids",
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        }
+        for var_name in (
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        ):
+            var = templating_vars[var_name]
+            assert var["datasource"]["uid"] == "${prometheusds}"
+            assert var.get("query"), f"Variable {var_name} has an empty query"
 
         logger.info("Removing grafana-dashboards integration")
         juju.remove_relation(
