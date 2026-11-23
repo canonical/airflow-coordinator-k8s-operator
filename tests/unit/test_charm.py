@@ -13,6 +13,7 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.git_integrator.v0.git as git
 import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
+import cosl
 import ops
 import ops.testing
 import pytest
@@ -2454,3 +2455,128 @@ class TestSendOtlp:
         otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
         assert "metadata" in otlp_relation_out.local_app_data
         assert "rules" in otlp_relation_out.local_app_data
+
+    def test_otlp_publishes_prometheus_and_loki_alert_rules(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify default PromQL and LogQL alert rules are loaded, scoped, and published."""
+        send_otlp_relation = ops.testing.Relation(
+            "send-otlp",
+            remote_app_data={},
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        decompressed_rules = json.loads(
+            cosl.LZMABase64.decompress(otlp_relation_out.local_app_data["rules"])
+        )
+
+        promql_rules_by_name = {
+            rule["alert"]: rule
+            for group in decompressed_rules["promql"]["groups"]
+            for rule in group["rules"]
+        }
+        expected_promql_alerts = {
+            "ApacheAirflowStarvingPoolTasks": (
+                "airflow_pool_starving_tasks",
+                'juju_charm="airflow-scheduler-k8s"',
+                "5m",
+            ),
+            "ApacheAirflowDAGScheduleDelayCritical": (
+                "airflow_dagrun_schedule_delay",
+                'juju_charm="airflow-scheduler-k8s"',
+                "1m",
+            ),
+            "AirflowTaskFailures": (
+                "airflow_ti_failures",
+                'juju_charm=~"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s"',
+                "1m",
+            ),
+            "AirflowSchedulerUnhealthy": (
+                "airflow_scheduler_heartbeat",
+                'juju_charm="airflow-scheduler-k8s"',
+                "5m",
+            ),
+            "AirflowDAGProcessorUnhealthy": (
+                "airflow_dag_processor_heartbeat",
+                'juju_charm="airflow-dag-processor-k8s"',
+                "5m",
+            ),
+            "AirflowTriggererUnhealthy": (
+                "airflow_triggerer_heartbeat",
+                'juju_charm="airflow-triggerer-k8s"',
+                "5m",
+            ),
+        }
+        for alert_name, (metric_name, charm_matcher, duration) in expected_promql_alerts.items():
+            assert alert_name in promql_rules_by_name
+            rule = promql_rules_by_name[alert_name]
+            assert rule["for"] == duration
+            assert rule["labels"]["severity"] == "critical"
+            assert rule["labels"]["juju_model"] == state_out.model.name
+            assert rule["labels"]["juju_model_uuid"] == state_out.model.uuid
+            assert rule["labels"]["juju_application"] == "airflow-coordinator-k8s"
+            expr = rule["expr"]
+            assert metric_name in expr
+            assert 'juju_model=~".*"' in expr
+            assert 'juju_model_uuid=~".*"' in expr
+            assert 'juju_application=~".*"' in expr
+            assert "target_info{" in expr
+            assert charm_matcher in expr
+            assert 'juju_application=~".+"' in expr
+            assert 'juju_application="airflow-coordinator-k8s"' not in expr
+
+        for heartbeat_alert in (
+            "AirflowSchedulerUnhealthy",
+            "AirflowDAGProcessorUnhealthy",
+            "AirflowTriggererUnhealthy",
+        ):
+            assert "absent_over_time((" in promql_rules_by_name[heartbeat_alert]["expr"]
+            assert "[5m:1m])" in promql_rules_by_name[heartbeat_alert]["expr"]
+
+        logql_rules_by_name = {
+            rule["alert"]: rule
+            for group in decompressed_rules["logql"]["groups"]
+            for rule in group["rules"]
+        }
+        assert "HighErrorLogRate" in logql_rules_by_name
+        loki_rule = logql_rules_by_name["HighErrorLogRate"]
+        assert loki_rule["for"] == "5m"
+        assert loki_rule["labels"]["severity"] == "critical"
+        assert loki_rule["labels"]["juju_model"] == state_out.model.name
+        assert loki_rule["labels"]["juju_model_uuid"] == state_out.model.uuid
+        assert loki_rule["labels"]["juju_application"] == "airflow-coordinator-k8s"
+        loki_expr = loki_rule["expr"]
+        assert 'juju_charm=~"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s"' in (
+            loki_expr
+        )
+        assert 'juju_application=~".+"' in loki_expr
+        assert 'juju_application="airflow-coordinator-k8s"' not in loki_expr
+        assert '| detected_level="error"' in loki_expr
+
+    def test_otlp_rules_not_published_on_non_leader(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify non-leader unit does not write rules or metadata to send-otlp app databag."""
+        send_otlp_relation = ops.testing.Relation(
+            "send-otlp",
+            remote_app_data={},
+        )
+        state_non_leader = dataclasses.replace(
+            state,
+            leader=False,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_non_leader)
+
+        otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
+        assert "metadata" not in otlp_relation_out.local_app_data
+        assert "rules" not in otlp_relation_out.local_app_data
+
