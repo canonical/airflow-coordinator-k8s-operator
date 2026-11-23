@@ -2503,10 +2503,10 @@ class TestGrafanaDashboards:
 
         decompressed = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
         assert decompressed["title"] == "Apache Airflow overview"
-        panel_titles = [
-            panel["title"] for panel in decompressed["panels"] if panel.get("type") != "row"
+        data_panels = [
+            panel for panel in decompressed["panels"] if panel.get("type") != "row"
         ]
-        assert panel_titles == [
+        assert [panel["title"] for panel in data_panels] == [
             "Component heartbeats",
             "DAG file parsing errors",
             "Task failures",
@@ -2516,6 +2516,40 @@ class TestGrafanaDashboards:
             "Pool task slots",
             "Airflow component logs",
         ]
+        for panel in data_panels:
+            expected_ds_uid = (
+                "${lokids}" if panel["title"] == "Airflow component logs" else "${prometheusds}"
+            )
+            assert panel["datasource"]["uid"] == expected_ds_uid
+            assert panel.get("targets"), f"Panel {panel['title']} has no targets"
+            for target in panel["targets"]:
+                assert target["datasource"]["uid"] == expected_ds_uid
+                assert target.get("expr"), f"Panel {panel['title']} has an empty target expr"
+
+        templating_vars = {
+            var["name"]: var for var in decompressed["templating"]["list"]
+        }
+        assert set(templating_vars) == {
+            "prometheusds",
+            "lokids",
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        }
+        for var_name in (
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        ):
+            var = templating_vars[var_name]
+            assert var["datasource"]["uid"] == "${prometheusds}"
+            assert var.get("query"), f"Variable {var_name} has an empty query"
 
     def test_grafana_dashboards_not_published_on_non_leader(
         self, context, state, mock_command_executor, workload_container

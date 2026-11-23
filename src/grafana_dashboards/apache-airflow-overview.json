@@ -78,8 +78,10 @@
       "id": 1,
       "options": {
         "legend": {
-          "calcs": [],
-          "displayMode": "list",
+          "calcs": [
+            "last"
+          ],
+          "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
@@ -94,7 +96,7 @@
             "type": "prometheus",
             "uid": "${prometheusds}"
           },
-          "expr": "rate(airflow_scheduler_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "expr": "rate(airflow_scheduler_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=\"airflow-scheduler-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
@@ -105,7 +107,7 @@
             "type": "prometheus",
             "uid": "${prometheusds}"
           },
-          "expr": "rate(airflow_dag_processor_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "expr": "rate(airflow_dag_processor_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=\"airflow-dag-processor-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
@@ -116,7 +118,7 @@
             "type": "prometheus",
             "uid": "${prometheusds}"
           },
-          "expr": "rate(airflow_triggerer_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "expr": "rate(airflow_triggerer_heartbeat{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=\"airflow-triggerer-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{juju_model}} / {{job}} ({{juju_unit}})",
@@ -308,7 +310,7 @@
             "type": "prometheus",
             "uid": "${prometheusds}"
           },
-          "expr": "sum by (job, juju_model) (increase(airflow_ti_failures{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
+          "expr": "sum by (job, juju_model, juju_model_uuid, juju_application) (increase(airflow_ti_failures{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"}[5m]) * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit) target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
           "format": "time_series",
           "interval": "1m",
           "intervalFactor": 2,
@@ -988,9 +990,9 @@
         "multi": true,
         "name": "pool_name",
         "options": [],
-        "query": "label_values(airflow_pool_open_slots{job=~\"$job\"}, pool_name)",
+        "query": "query_result(airflow_pool_open_slots{job=~\"$job\", juju_model=~\".*\", juju_model_uuid=~\".*\", juju_application=~\".*\", juju_unit=~\".*\"} * on (job, instance) group_left () target_info{juju_charm=~\"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
         "refresh": 2,
-        "regex": "",
+        "regex": "/pool_name=\"([^\"]+)\"/",
         "sort": 0,
         "tagValuesQuery": "",
         "tags": [],
