@@ -1,0 +1,86 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+groups:
+  - name: AirflowAlerts
+    rules:
+      - alert: ApacheAirflowStarvingPoolTasks
+        expr: >-
+          (airflow_pool_starving_tasks{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-scheduler-k8s", juju_application=~".+"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Apache Airflow has starving tasks in pool {{ $labels.pool_name }}."
+          description: "Pool {{ $labels.pool_name }} in model {{ $labels.juju_model }} has had {{ $value }} starving tasks for more than 5 minutes."
+
+      - alert: ApacheAirflowDAGScheduleDelayCritical
+        expr: >-
+          (airflow_dagrun_schedule_delay{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-scheduler-k8s", juju_application=~".+"}) > 60000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Apache Airflow DAG schedule delay is critical for DAG {{ $labels.dag_id }}."
+          description: "DAG {{ $labels.dag_id }} in model {{ $labels.juju_model }} has a schedule delay of {{ $value }}ms (> 60000ms)."
+
+      - alert: AirflowTaskFailures
+        expr: >-
+          (increase(airflow_ti_failures{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}[5m])
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm=~"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s", juju_application=~".+"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Apache Airflow task instance failures detected in {{ $labels.job }} ({{ $labels.juju_unit }})."
+          description: "Task failures increased over the last 5 minutes for unit {{ $labels.juju_unit }} ({{ $labels.job }}) in model {{ $labels.juju_model }}."
+
+      - alert: AirflowSchedulerUnhealthy
+        expr: >-
+          (rate(airflow_scheduler_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}[5m])
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-scheduler-k8s", juju_application=~".+"} == 0)
+          or absent_over_time((airflow_scheduler_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-scheduler-k8s", juju_application=~".+"})[5m:1m])
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow Scheduler is unhealthy in model {{ $labels.juju_model }}."
+          description: "No Airflow Scheduler heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."
+
+      - alert: AirflowDAGProcessorUnhealthy
+        expr: >-
+          (rate(airflow_dag_processor_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}[5m])
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-dag-processor-k8s", juju_application=~".+"} == 0)
+          or absent_over_time((airflow_dag_processor_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-dag-processor-k8s", juju_application=~".+"})[5m:1m])
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow DAG Processor is unhealthy in model {{ $labels.juju_model }}."
+          description: "No Airflow DAG Processor heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."
+
+      - alert: AirflowTriggererUnhealthy
+        expr: >-
+          (rate(airflow_triggerer_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}[5m])
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-triggerer-k8s", juju_application=~".+"} == 0)
+          or absent_over_time((airflow_triggerer_heartbeat{juju_model=~".*", juju_model_uuid=~".*", juju_application=~".*"}
+          * on (job, instance) group_left (juju_model, juju_model_uuid, juju_application, juju_unit)
+          target_info{juju_charm="airflow-triggerer-k8s", juju_application=~".+"})[5m:1m])
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow Triggerer is unhealthy in model {{ $labels.juju_model }}."
+          description: "No Airflow Triggerer heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."

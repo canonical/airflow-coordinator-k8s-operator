@@ -1,0 +1,16 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+groups:
+  - name: AirflowLogAlerts
+    rules:
+      - alert: HighErrorLogRate
+        expr: >-
+          sum by (juju_model, juju_model_uuid, juju_application, juju_unit)
+          (count_over_time({juju_charm=~"airflow-(scheduler|dag-processor|triggerer|api-server)-k8s", juju_application=~".+"} | detected_level="error" [5m])) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error log rate in {{ $labels.juju_unit }}."
+          description: "Unit {{ $labels.juju_unit }} in model {{ $labels.juju_model }} logged {{ $value }} errors in the last 5 minutes."
