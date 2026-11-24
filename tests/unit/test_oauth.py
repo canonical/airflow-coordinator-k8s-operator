@@ -3,9 +3,11 @@
 
 """Tests for the OAuth integration."""
 
+import ast
 import configparser
 import dataclasses
 import unittest.mock
+from urllib.parse import urlsplit
 
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.hydra.v0.oauth as oauth
@@ -210,6 +212,99 @@ class TestOAuth:
         assert "admin-group" in webserver_template
         assert "super-users" in webserver_template
         assert "staff" in webserver_template
+
+    def test_oauth_redirect_uri_registered_with_auth_prefix(
+        self,
+        context,
+        state_with_oauth,
+        mock_get_provider_info,
+    ):
+        """The redirect_uri registered with the provider must end with the FAB
+        auth manager callback route.
+
+        Airflow 3's FAB auth manager mounts its views under ``/auth``, so the
+        callback is ``/auth/oauth-authorized/hydra``. The registered redirect_uri
+        must match exactly or the provider rejects the authorization request.
+        """
+        with (
+            unittest.mock.patch.object(
+                oauth.OAuthRequirer,
+                "update_client_config",
+            ) as mock_update,
+            unittest.mock.patch.object(
+                airflow_coordinator.AirflowCoordinatorProvides,
+                "set_airflow_config",
+            ) as mock_set,
+        ):
+            context.run(context.on.start(), state_with_oauth)
+
+        assert mock_update.called
+        client_config = mock_update.call_args.args[0]
+        assert (
+            client_config.redirect_uri == "http://test-host:test-port/auth/oauth-authorized/hydra"
+        )
+        webserver_template = mock_set.call_args.kwargs["webserver_config_template"]
+        assert webserver_template is not None
+        module = ast.parse(webserver_template)
+        providers_node = next(
+            node.value
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "OAUTH_PROVIDERS"
+                for target in node.targets
+            )
+        )
+        providers = ast.literal_eval(providers_node)
+        assert len(providers) == 1
+        assert urlsplit(client_config.redirect_uri).path == (
+            f"/auth/oauth-authorized/{providers[0]['name']}"
+        )
+
+    @pytest.mark.parametrize(
+        ("ingress_url", "expected_redirect_uri"),
+        [
+            (
+                "https://airflow.example.com/",
+                "https://airflow.example.com/auth/oauth-authorized/hydra",
+            ),
+            (
+                "https://airflow.example.com/airflow/",
+                "https://airflow.example.com/airflow/auth/oauth-authorized/hydra",
+            ),
+        ],
+    )
+    def test_oauth_redirect_uri_uses_ingress_url(
+        self,
+        context,
+        state_with_oauth,
+        mock_get_provider_info,
+        airflow_api_server_requires_relation,
+        ingress_url,
+        expected_redirect_uri,
+    ):
+        ingress_relation = dataclasses.replace(
+            airflow_api_server_requires_relation,
+            remote_app_data={
+                **airflow_api_server_requires_relation.remote_app_data,
+                "ingress_url": ingress_url,
+            },
+        )
+        state = dataclasses.replace(
+            state_with_oauth,
+            relations=[
+                ingress_relation if relation.id == ingress_relation.id else relation
+                for relation in state_with_oauth.relations
+            ],
+        )
+        with unittest.mock.patch.object(
+            oauth.OAuthRequirer,
+            "update_client_config",
+        ) as mock_update:
+            context.run(context.on.start(), state)
+
+        assert mock_update.called
+        assert mock_update.call_args.args[0].redirect_uri == expected_redirect_uri
 
     def test_oauth_provider_info_unavailable_does_not_block(
         self,
