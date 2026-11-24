@@ -2461,11 +2461,10 @@ class TestGrafanaDashboards:
     def test_grafana_dashboards_absent(
         self, context, state, mock_command_executor, workload_container
     ):
-        """Verify charm is Active and no grafana-dashboards relation exists when unrelated."""
+        """Verify charm is Active when grafana-dashboards relation is absent."""
         state_out = context.run(context.on.start(), state)
 
         assert state_out.unit_status == ops.ActiveStatus()
-        assert not state_out.get_relations("grafana-dashboards")
 
     def test_grafana_dashboards_published_when_related(
         self, context, state, mock_command_executor, workload_container
@@ -2595,16 +2594,11 @@ class TestGrafanaDashboards:
         assert second_data["uuid"] == first_data["uuid"]
         assert second_data["templates"] == first_data["templates"]
 
-        # Remove relation and verify charm reconciles cleanly
-        relations_without_grafana = [
-            r for r in state_after_config.relations if r.id != grafana_relation.id
-        ]
-        state_removed = dataclasses.replace(
+        # Break relation and verify charm reconciles cleanly
+        grafana_relation_after_config = state_after_config.get_relation(grafana_relation.id)
+        state_out = context.run(
+            context.on.relation_broken(grafana_relation_after_config),
             state_after_config,
-            relations=relations_without_grafana,
-            containers=[workload_container],
         )
-        state_out = context.run(context.on.update_status(), state_removed)
 
         assert state_out.unit_status == ops.ActiveStatus()
-        assert not state_out.get_relations("grafana-dashboards")
