@@ -18,6 +18,7 @@ import charms.airflow_api_server_k8s.v0.airflow_api_server as airflow_api_server
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.data_platform_libs.v0.data_interfaces as data_interfaces_v0
 import charms.git_integrator.v0.git as git
+import charms.grafana_k8s.v0.grafana_dashboard as grafana_dashboard
 import charms.hydra.v0.oauth as oauth
 import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
 import mergedeep
@@ -192,6 +193,12 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             relation_name=constants.SEND_OTLP_RELATION_NAME,
             protocols=["http"],
             telemetries=["logs", "metrics", "traces"],
+        )
+
+        self._grafana_dashboards = grafana_dashboard.GrafanaDashboardProvider(
+            self,
+            relation_name=constants.GRAFANA_DASHBOARDS_RELATION_NAME,
+            dashboards_path="src/grafana_dashboards",
         )
 
         for event in [

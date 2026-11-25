@@ -13,6 +13,7 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.git_integrator.v0.git as git
 import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
+import cosl
 import ops
 import ops.testing
 import pytest
@@ -2454,3 +2455,150 @@ class TestSendOtlp:
         otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
         assert "metadata" in otlp_relation_out.local_app_data
         assert "rules" in otlp_relation_out.local_app_data
+
+
+class TestGrafanaDashboards:
+    def test_grafana_dashboards_absent(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify charm is Active when grafana-dashboards relation is absent."""
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+    def test_grafana_dashboards_published_when_related(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify dashboard template is compressed and published in application databag."""
+        state_active = dataclasses.replace(
+            context.run(context.on.start(), state),
+            containers=[workload_container],
+        )
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_with_grafana = dataclasses.replace(
+            state_active,
+            relations=[*state_active.relations, grafana_relation],
+        )
+
+        state_out = context.run(context.on.relation_created(grafana_relation), state_with_grafana)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        relation_out = state_out.get_relation(grafana_relation.id)
+        assert "dashboards" in relation_out.local_app_data
+
+        dashboards_data = json.loads(relation_out.local_app_data["dashboards"])
+        assert "uuid" in dashboards_data
+        assert "templates" in dashboards_data
+        assert "file:apache-airflow-overview" in dashboards_data["templates"]
+
+        template_entry = dashboards_data["templates"]["file:apache-airflow-overview"]
+        assert template_entry["charm"] == "airflow-coordinator-k8s"
+        assert template_entry["juju_topology"] == {
+            "model": state_out.model.name,
+            "model_uuid": state_out.model.uuid,
+            "application": "airflow-coordinator-k8s",
+            "unit": "airflow-coordinator-k8s/0",
+        }
+
+        decompressed = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
+        assert decompressed["title"] == "Apache Airflow overview"
+        data_panels = [
+            panel for panel in decompressed["panels"] if panel.get("type") != "row"
+        ]
+        assert [panel["title"] for panel in data_panels] == [
+            "Component heartbeats",
+            "DAG file parsing errors",
+            "Task failures",
+            "DAG schedule delay",
+            "Scheduler tasks",
+            "Executor tasks",
+            "Pool task slots",
+            "Airflow component logs",
+        ]
+        for panel in data_panels:
+            expected_ds_uid = (
+                "${lokids}" if panel["title"] == "Airflow component logs" else "${prometheusds}"
+            )
+            assert panel["datasource"]["uid"] == expected_ds_uid
+            assert panel.get("targets"), f"Panel {panel['title']} has no targets"
+            for target in panel["targets"]:
+                assert target["datasource"]["uid"] == expected_ds_uid
+                assert target.get("expr"), f"Panel {panel['title']} has an empty target expr"
+
+        templating_vars = {
+            var["name"]: var for var in decompressed["templating"]["list"]
+        }
+        assert set(templating_vars) == {
+            "prometheusds",
+            "lokids",
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        }
+        for var_name in (
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        ):
+            var = templating_vars[var_name]
+            assert var["datasource"]["uid"] == "${prometheusds}"
+            assert var.get("query"), f"Variable {var_name} has an empty query"
+
+    def test_grafana_dashboards_not_published_on_non_leader(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify non-leader unit does not write dashboards to the application databag."""
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_non_leader = dataclasses.replace(
+            state,
+            leader=False,
+            relations=[*state.relations, grafana_relation],
+        )
+
+        state_out = context.run(context.on.relation_created(grafana_relation), state_non_leader)
+
+        relation_out = state_out.get_relation(grafana_relation.id)
+        assert "dashboards" not in relation_out.local_app_data
+
+    def test_grafana_dashboards_idempotent_across_config_changed_and_removed_cleanly(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify dashboard UUID is stable on config-changed and relation removal succeeds."""
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_with_grafana = dataclasses.replace(
+            state,
+            relations=[*state.relations, grafana_relation],
+        )
+
+        state_after_created = dataclasses.replace(
+            context.run(context.on.relation_created(grafana_relation), state_with_grafana),
+            containers=[workload_container],
+        )
+        first_data = json.loads(
+            state_after_created.get_relation(grafana_relation.id).local_app_data["dashboards"]
+        )
+
+        state_after_config = dataclasses.replace(
+            context.run(context.on.config_changed(), state_after_created),
+            containers=[workload_container],
+        )
+        second_data = json.loads(
+            state_after_config.get_relation(grafana_relation.id).local_app_data["dashboards"]
+        )
+        assert second_data["uuid"] == first_data["uuid"]
+        assert second_data["templates"] == first_data["templates"]
+
+        # Break relation and verify charm reconciles cleanly
+        grafana_relation_after_config = state_after_config.get_relation(grafana_relation.id)
+        state_out = context.run(
+            context.on.relation_broken(grafana_relation_after_config),
+            state_after_config,
+        )
+
+        assert state_out.unit_status == ops.ActiveStatus()
