@@ -52,8 +52,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Airflow Scheduler is unhealthy in model {{ $labels.juju_model }}."
-          description: "No Airflow Scheduler heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."
+          summary: "Airflow Scheduler is unhealthy."
+          description: "No Airflow Scheduler heartbeat has been recorded for more than 5 minutes."
 
       - alert: AirflowDAGProcessorUnhealthy
         expr: >-
@@ -67,8 +67,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Airflow DAG Processor is unhealthy in model {{ $labels.juju_model }}."
-          description: "No Airflow DAG Processor heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."
+          summary: "Airflow DAG Processor is unhealthy."
+          description: "No Airflow DAG Processor heartbeat has been recorded for more than 5 minutes."
 
       - alert: AirflowTriggererUnhealthy
         expr: >-
@@ -82,5 +82,5 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Airflow Triggerer is unhealthy in model {{ $labels.juju_model }}."
-          description: "No Airflow Triggerer heartbeat has been recorded for more than 5 minutes in model {{ $labels.juju_model }}."
+          summary: "Airflow Triggerer is unhealthy."
+          description: "No Airflow Triggerer heartbeat has been recorded for more than 5 minutes."
