@@ -13,6 +13,7 @@ import unittest.mock
 import charms.airflow_coordinator_k8s.v0.airflow_coordinator as airflow_coordinator
 import charms.git_integrator.v0.git as git
 import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
+import cosl
 import ops
 import ops.testing
 import pytest
@@ -964,6 +965,7 @@ class TestDagBundles:
             except (configparser.NoSectionError, configparser.NoOptionError):
                 pass
 
+    @pytest.mark.parametrize("ssh_options", [False, True])
     def test_valid_git_relations_succeed(
         self,
         context,
@@ -971,8 +973,46 @@ class TestDagBundles:
         git_unauthenticated_relation,
         git_credentials_relation,
         git_ssh_relation,
+        git_ssh_secret,
+        ssh_options,
     ):
         """Valid DAG bundles configured when multiple related git-integrators."""
+        expected_ssh_extra = {"private_key": "test-key", "strict_host_key_checking": True}
+        if ssh_options:
+            git_ssh_relation = dataclasses.replace(
+                git_ssh_relation,
+                remote_app_data={
+                    **git_ssh_relation.remote_app_data,
+                    "secret-ssh-passphrase": git_ssh_secret.id,
+                    "ssh-strict-host-key-checking": "false",
+                    "ssh-port": "2222",
+                },
+            )
+            git_ssh_secret = dataclasses.replace(
+                git_ssh_secret,
+                latest_content={
+                    "ssh-private-key": "private-key\nsecond-line",
+                    "ssh-passphrase": "passphrase",
+                },
+            )
+            state_without_s3 = dataclasses.replace(
+                state_without_s3,
+                relations=[
+                    git_ssh_relation if relation.id == git_ssh_relation.id else relation
+                    for relation in state_without_s3.relations
+                ],
+                secrets=[
+                    git_ssh_secret if secret.id == git_ssh_secret.id else secret
+                    for secret in state_without_s3.secrets
+                ],
+            )
+            expected_ssh_extra = {
+                "private_key": "private-key\nsecond-line",
+                "private_key_passphrase": "passphrase",
+                "strict_host_key_checking": False,
+                "ssh_port": "2222",
+            }
+
         state_out = context.run(context.on.start(), state_without_s3)
 
         assert state_out.unit_status == ops.ActiveStatus()
@@ -1007,6 +1047,32 @@ class TestDagBundles:
                     git_ssh_relation.id: git_ssh_relation.remote_app_data,
                 }.items()
             ]
+
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert json.loads(
+                sensitive_data[
+                    f"connections__git_relation_{git_credentials_relation.id}_connection"
+                ]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url2",
+                "login": "user",
+                "password": "test-token",
+            }
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": expected_ssh_extra,
+            }
+            assert (
+                f"connections__git_relation_{git_unauthenticated_relation.id}_connection"
+                not in sensitive_data
+            )
 
     def test_change_in_git_connection(
         self,
@@ -1284,6 +1350,16 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                in sensitive_data
+            )
+            assert f"connections__git_relation_{git_ssh_relation.id}_connection" in sensitive_data
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
@@ -1346,13 +1422,13 @@ class TestDagBundles:
 
         relations_with_removed_git_relation = [
             relation
-            for relation in state_without_s3.relations
+            for relation in state_out.relations
             if relation.endpoint != constants.GIT_ENDPOINT_NAME
         ]
         relations_with_removed_git_relation.append(git_ssh_relation)
 
         state_modified = dataclasses.replace(
-            state_without_s3,
+            state_out,
             relations=relations_with_removed_git_relation,
             containers=[workload_container],
         )
@@ -1364,6 +1440,22 @@ class TestDagBundles:
         assert state_out.unit_status == ops.ActiveStatus()
 
         for relation in state_out.get_relations("airflow-coordinator"):
+            sensitive_secret_id = relation.local_app_data["secret-sensitive-data"]
+            sensitive_data = json.loads(
+                state_out.get_secret(id=sensitive_secret_id).latest_content["sensitive-data"]
+            )
+            assert (
+                f"connections__git_relation_{git_credentials_relation.id}_connection"
+                not in sensitive_data
+            )
+            assert json.loads(
+                sensitive_data[f"connections__git_relation_{git_ssh_relation.id}_connection"]
+            ) == {
+                "conn_type": "git",
+                "host": "test-repo-url3",
+                "extra": {"private_key": "test-key", "strict_host_key_checking": True},
+            }
+
             config_template = relation.local_app_data.get("config-template", "")
             parsed = configparser.ConfigParser()
             parsed.read_string(config_template)
@@ -2014,10 +2106,17 @@ class TestSendOtlp:
 
         assert state_out.unit_status == ops.ActiveStatus()
 
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
+
     def test_otlp_endpoint_returns_http_endpoint_and_publishes_databag(
         self, context, state, mock_command_executor, workload_container
     ):
-        """Verify _otlp_endpoint selects the HTTP endpoint and publishes requirer app data."""
+        """Verify _otlp_endpoint selects HTTP, renders OTel config, and sets otlp-endpoint."""
         send_otlp_relation = ops.testing.Relation(
             constants.SEND_OTLP_RELATION_NAME,
             remote_app_data={
@@ -2053,10 +2152,243 @@ class TestSendOtlp:
         assert "metadata" in otlp_relation_out.local_app_data
         assert "rules" in otlp_relation_out.local_app_data
 
+        expected_otel_section = {
+            "otel_on": "True",
+            "otel_host": "1.2.3.4",
+            "otel_port": "4318",
+            "otel_service": "{{ otel_service | default('airflow') }}",
+            "otel_ssl_active": "False",
+        }
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://1.2.3.4:4318"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert dict(parsed.items("metrics")) == expected_otel_section
+            assert dict(parsed.items("traces")) == expected_otel_section
+
+        coordinator_fs = state_out.get_container(constants.WORKLOAD_CONTAINER_NAME).get_filesystem(
+            context
+        )
+        coordinator_cfg_text = (
+            coordinator_fs / constants.AIRFLOW_CONFIG_PATH.lstrip("/")
+        ).read_text()
+        coordinator_parsed = configparser.RawConfigParser()
+        coordinator_parsed.read_string(coordinator_cfg_text)
+        assert coordinator_parsed.get("metrics", "otel_service") == "airflow-coordinator-k8s"
+        assert coordinator_parsed.get("traces", "otel_service") == "airflow-coordinator-k8s"
+
+    def test_otlp_endpoint_defaults_port_to_4318_when_omitted(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify telemetry_config falls back to port 4318 when the endpoint URL omits a port."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://otelcol.airflow.svc.cluster.local",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp)
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "otelcol.airflow.svc.cluster.local"
+            assert parsed.get("metrics", "otel_port") == "4318"
+            assert parsed.get("traces", "otel_host") == "otelcol.airflow.svc.cluster.local"
+            assert parsed.get("traces", "otel_port") == "4318"
+
+    def test_https_otlp_endpoint_sets_otel_ssl_active_true(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify an https:// OTLP endpoint sets otel_ssl_active = True."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "https://otelcol.airflow.svc.cluster.local:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": False,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        state_out = context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp)
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_ssl_active") == "True"
+            assert parsed.get("traces", "otel_ssl_active") == "True"
+
+    @pytest.mark.parametrize(
+        "malformed_endpoint",
+        [
+            "http://otelcol:invalid",
+            "http://otelcol:99999",
+            "http://[::1",
+            "otelcol:4318",
+            "http://:4318",
+        ],
+    )
+    def test_malformed_otlp_endpoint_is_ignored_without_failing_reconcile(
+        self, context, state, mock_command_executor, workload_container, malformed_endpoint
+    ):
+        """Verify malformed OTLP endpoints are caught and omitted without failing reconcile."""
+        send_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": malformed_endpoint,
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_with_otlp = dataclasses.replace(
+            state,
+            relations=[*state.relations, send_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(send_otlp_relation), state_with_otlp) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint is None
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
+
+    def test_otlp_endpoint_updated_in_place_on_relation_changed(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify an endpoint change on an active send-otlp relation updates host and port."""
+        initial_otlp_relation = ops.testing.Relation(
+            constants.SEND_OTLP_RELATION_NAME,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://10.0.0.1:4318",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        state_initial = dataclasses.replace(
+            state,
+            relations=[*state.relations, initial_otlp_relation],
+        )
+
+        with context(context.on.relation_changed(initial_otlp_relation), state_initial) as manager:
+            state_after_first = manager.run()
+            assert manager.charm._otlp_endpoint == "http://10.0.0.1:4318"
+
+        for relation in state_after_first.get_relations(
+            constants.AIRFLOW_COORDINATOR_RELATION_NAME
+        ):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://10.0.0.1:4318"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "10.0.0.1"
+            assert parsed.get("metrics", "otel_port") == "4318"
+            assert parsed.get("traces", "otel_host") == "10.0.0.1"
+            assert parsed.get("traces", "otel_port") == "4318"
+
+        # Update the endpoint in-place on the same active send-otlp relation.
+        existing_otlp_rel = state_after_first.get_relation(initial_otlp_relation.id)
+        updated_otlp_relation = dataclasses.replace(
+            existing_otlp_rel,
+            remote_app_data={
+                "endpoints": json.dumps(
+                    [
+                        {
+                            "protocol": "http",
+                            "endpoint": "http://10.0.0.2:4319",
+                            "telemetries": ["logs", "metrics", "traces"],
+                            "insecure": True,
+                        },
+                    ]
+                ),
+            },
+        )
+        relations_with_updated_otlp = [
+            updated_otlp_relation if r.id == initial_otlp_relation.id else r
+            for r in state_after_first.relations
+        ]
+        state_updated = dataclasses.replace(
+            state_after_first,
+            relations=relations_with_updated_otlp,
+            containers=[workload_container],
+        )
+
+        with context(context.on.relation_changed(updated_otlp_relation), state_updated) as manager:
+            state_out = manager.run()
+            assert manager.charm._otlp_endpoint == "http://10.0.0.2:4319"
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert relation.local_app_data.get("otlp-endpoint") == "http://10.0.0.2:4319"
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert parsed.get("metrics", "otel_host") == "10.0.0.2"
+            assert parsed.get("metrics", "otel_port") == "4319"
+            assert parsed.get("traces", "otel_host") == "10.0.0.2"
+            assert parsed.get("traces", "otel_port") == "4319"
+
+        coordinator_fs = state_out.get_container(constants.WORKLOAD_CONTAINER_NAME).get_filesystem(
+            context
+        )
+        coordinator_cfg_text = (
+            coordinator_fs / constants.AIRFLOW_CONFIG_PATH.lstrip("/")
+        ).read_text()
+        coordinator_parsed = configparser.RawConfigParser()
+        coordinator_parsed.read_string(coordinator_cfg_text)
+        assert coordinator_parsed.get("metrics", "otel_host") == "10.0.0.2"
+        assert coordinator_parsed.get("metrics", "otel_port") == "4319"
+        assert coordinator_parsed.get("traces", "otel_host") == "10.0.0.2"
+        assert coordinator_parsed.get("traces", "otel_port") == "4319"
+
     def test_otlp_endpoint_returns_none_when_relation_broken(
         self, context, state, mock_command_executor, workload_container
     ):
-        """Verify charm reconciles cleanly when send-otlp relation is broken."""
+        """Verify breaking send-otlp removes [metrics]/[traces] and clears otlp-endpoint."""
         send_otlp_relation = ops.testing.Relation(
             constants.SEND_OTLP_RELATION_NAME,
             remote_app_data={
@@ -2082,12 +2414,25 @@ class TestSendOtlp:
             state,
             relations=[*state.relations, send_otlp_relation],
         )
+        state_after_changed = dataclasses.replace(
+            context.run(context.on.relation_changed(send_otlp_relation), state_with_otlp),
+            containers=[workload_container],
+        )
+        send_otlp_after_changed = state_after_changed.get_relation(send_otlp_relation.id)
 
-        with context(context.on.relation_broken(send_otlp_relation), state_with_otlp) as manager:
+        with context(
+            context.on.relation_broken(send_otlp_after_changed), state_after_changed
+        ) as manager:
             state_out = manager.run()
             assert manager.charm._otlp_endpoint is None
 
         assert state_out.unit_status == ops.ActiveStatus()
+        for relation in state_out.get_relations(constants.AIRFLOW_COORDINATOR_RELATION_NAME):
+            assert "otlp-endpoint" not in relation.local_app_data
+            parsed = configparser.RawConfigParser()
+            parsed.read_string(relation.local_app_data["config-template"])
+            assert not parsed.has_section("metrics")
+            assert not parsed.has_section("traces")
 
     def test_otlp_publishes_databag_when_charm_waiting_or_blocked(
         self, context, state, mock_command_executor, workload_container
@@ -2110,3 +2455,150 @@ class TestSendOtlp:
         otlp_relation_out = state_out.get_relation(send_otlp_relation.id)
         assert "metadata" in otlp_relation_out.local_app_data
         assert "rules" in otlp_relation_out.local_app_data
+
+
+class TestGrafanaDashboards:
+    def test_grafana_dashboards_absent(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify charm is Active when grafana-dashboards relation is absent."""
+        state_out = context.run(context.on.start(), state)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+
+    def test_grafana_dashboards_published_when_related(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify dashboard template is compressed and published in application databag."""
+        state_active = dataclasses.replace(
+            context.run(context.on.start(), state),
+            containers=[workload_container],
+        )
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_with_grafana = dataclasses.replace(
+            state_active,
+            relations=[*state_active.relations, grafana_relation],
+        )
+
+        state_out = context.run(context.on.relation_created(grafana_relation), state_with_grafana)
+
+        assert state_out.unit_status == ops.ActiveStatus()
+        relation_out = state_out.get_relation(grafana_relation.id)
+        assert "dashboards" in relation_out.local_app_data
+
+        dashboards_data = json.loads(relation_out.local_app_data["dashboards"])
+        assert "uuid" in dashboards_data
+        assert "templates" in dashboards_data
+        assert "file:apache-airflow-overview" in dashboards_data["templates"]
+
+        template_entry = dashboards_data["templates"]["file:apache-airflow-overview"]
+        assert template_entry["charm"] == "airflow-coordinator-k8s"
+        assert template_entry["juju_topology"] == {
+            "model": state_out.model.name,
+            "model_uuid": state_out.model.uuid,
+            "application": "airflow-coordinator-k8s",
+            "unit": "airflow-coordinator-k8s/0",
+        }
+
+        decompressed = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
+        assert decompressed["title"] == "Apache Airflow overview"
+        data_panels = [
+            panel for panel in decompressed["panels"] if panel.get("type") != "row"
+        ]
+        assert [panel["title"] for panel in data_panels] == [
+            "Component heartbeats",
+            "DAG file parsing errors",
+            "Task failures",
+            "DAG schedule delay",
+            "Scheduler tasks",
+            "Executor tasks",
+            "Pool task slots",
+            "Airflow component logs",
+        ]
+        for panel in data_panels:
+            expected_ds_uid = (
+                "${lokids}" if panel["title"] == "Airflow component logs" else "${prometheusds}"
+            )
+            assert panel["datasource"]["uid"] == expected_ds_uid
+            assert panel.get("targets"), f"Panel {panel['title']} has no targets"
+            for target in panel["targets"]:
+                assert target["datasource"]["uid"] == expected_ds_uid
+                assert target.get("expr"), f"Panel {panel['title']} has an empty target expr"
+
+        templating_vars = {
+            var["name"]: var for var in decompressed["templating"]["list"]
+        }
+        assert set(templating_vars) == {
+            "prometheusds",
+            "lokids",
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        }
+        for var_name in (
+            "juju_model",
+            "juju_model_uuid",
+            "juju_application",
+            "juju_unit",
+            "job",
+            "pool_name",
+        ):
+            var = templating_vars[var_name]
+            assert var["datasource"]["uid"] == "${prometheusds}"
+            assert var.get("query"), f"Variable {var_name} has an empty query"
+
+    def test_grafana_dashboards_not_published_on_non_leader(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify non-leader unit does not write dashboards to the application databag."""
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_non_leader = dataclasses.replace(
+            state,
+            leader=False,
+            relations=[*state.relations, grafana_relation],
+        )
+
+        state_out = context.run(context.on.relation_created(grafana_relation), state_non_leader)
+
+        relation_out = state_out.get_relation(grafana_relation.id)
+        assert "dashboards" not in relation_out.local_app_data
+
+    def test_grafana_dashboards_idempotent_across_config_changed_and_removed_cleanly(
+        self, context, state, mock_command_executor, workload_container
+    ):
+        """Verify dashboard UUID is stable on config-changed and relation removal succeeds."""
+        grafana_relation = ops.testing.Relation("grafana-dashboards")
+        state_with_grafana = dataclasses.replace(
+            state,
+            relations=[*state.relations, grafana_relation],
+        )
+
+        state_after_created = dataclasses.replace(
+            context.run(context.on.relation_created(grafana_relation), state_with_grafana),
+            containers=[workload_container],
+        )
+        first_data = json.loads(
+            state_after_created.get_relation(grafana_relation.id).local_app_data["dashboards"]
+        )
+
+        state_after_config = dataclasses.replace(
+            context.run(context.on.config_changed(), state_after_created),
+            containers=[workload_container],
+        )
+        second_data = json.loads(
+            state_after_config.get_relation(grafana_relation.id).local_app_data["dashboards"]
+        )
+        assert second_data["uuid"] == first_data["uuid"]
+        assert second_data["templates"] == first_data["templates"]
+
+        # Break relation and verify charm reconciles cleanly
+        grafana_relation_after_config = state_after_config.get_relation(grafana_relation.id)
+        state_out = context.run(
+            context.on.relation_broken(grafana_relation_after_config),
+            state_after_config,
+        )
+
+        assert state_out.unit_status == ops.ActiveStatus()

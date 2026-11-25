@@ -8,8 +8,11 @@ import collections.abc
 import json
 import logging
 import pathlib
+import re
 import time
+import urllib.parse
 
+import cosl
 import cryptography.fernet
 import jubilant
 import yaml
@@ -479,6 +482,54 @@ def _core_charm_configs(juju: jubilant.Juju) -> set[str]:
     return {_core_charm_config(juju, component) for component in AIRFLOW_COMPONENTS}
 
 
+_OTELCOL_METRIC_LINE_RE = re.compile(
+    r"^otelcol_receiver_accepted_metric_points(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$",
+    re.MULTILINE,
+)
+
+
+def _otelcol_accepted_metric_points(juju: jubilant.Juju) -> float | None:
+    """Return the HTTP OTLP accepted metric points counter from otelcol self-monitoring.
+
+    Returns None when the series has not been emitted yet (before any OTLP metric
+    point has been received by the collector).
+    """
+    out = juju.ssh("otelcol/0", "curl -s http://localhost:8888/metrics")
+    for match in _OTELCOL_METRIC_LINE_RE.finditer(out):
+        labels = match.group(1) or ""
+        if 'receiver="otlp' in labels and 'transport="http"' in labels:
+            return float(match.group(2))
+    return None
+
+
+def _assert_airflow_metric_reaches_otelcol(juju: jubilant.Juju, timeout: int = 60) -> None:
+    """Emit an Airflow metric using /airflow.cfg and poll until otelcol records it."""
+    before_points = _otelcol_accepted_metric_points(juju) or 0.0
+    deadline = time.monotonic() + timeout
+    last_points: float | None = None
+
+    while time.monotonic() < deadline:
+        juju.ssh(
+            "airflow-scheduler-mock/0",
+            "AIRFLOW_CONFIG=/airflow.cfg python3 -c "
+            '"from opentelemetry import metrics; from airflow.stats import Stats; '
+            "Stats.incr('test_metric'); "
+            "assert type(Stats.instance).__name__ == 'SafeOtelLogger', "
+            "type(Stats.instance).__name__; "
+            'metrics.get_meter_provider().force_flush()"',
+            container="workload",
+        )
+        last_points = _otelcol_accepted_metric_points(juju)
+        if last_points is not None and last_points > before_points:
+            return
+        time.sleep(5)
+
+    raise AssertionError(
+        f"Expected otelcol_receiver_accepted_metric_points > {before_points} within {timeout}s, "
+        f"got {last_points!r}"
+    )
+
+
 def _wait_for_core_configs(
     juju: jubilant.Juju,
     predicate: collections.abc.Callable[[str], bool],
@@ -805,10 +856,17 @@ def test_send_otlp_integration(juju: jubilant.Juju):
 
         juju.wait(
             lambda status: (
-                jubilant.all_active(status, "airflow-coordinator-k8s")
-                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                jubilant.all_active(
+                    status,
+                    "airflow-coordinator-k8s",
+                    *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
+                )
+                and jubilant.all_blocked(status, "otelcol")
+                and jubilant.all_agents_idle(status)
             ),
             error=jubilant.any_error,
+            successes=3,
+            delay=5,
         )
 
         status = juju.status()
@@ -833,14 +891,37 @@ def test_send_otlp_integration(juju: jubilant.Juju):
                 "json",
             )
         )
-        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"][
-            "relation-info"
-        ][0]["application-data"]
+        coordinator_app_data = coordinator_unit_info["airflow-coordinator-k8s/0"]["relation-info"][
+            0
+        ]["application-data"]
         endpoints = json.loads(coordinator_app_data["endpoints"])
         http_endpoints = [ep["endpoint"] for ep in endpoints if ep.get("protocol") == "http"]
         assert len(http_endpoints) == 1
-        assert http_endpoints[0].startswith("http://")
-        assert http_endpoints[0].endswith(":4318")
+        expected_otlp_endpoint = http_endpoints[0]
+        assert expected_otlp_endpoint.startswith("http://")
+        assert expected_otlp_endpoint.endswith(":4318")
+        expected_otel_host = urllib.parse.urlparse(expected_otlp_endpoint).hostname
+        assert expected_otel_host
+
+        # Verify every core charm receives otlp_endpoint and renders its own
+        # otel_service in [metrics] and [traces] of airflow.cfg.
+        for component in AIRFLOW_COMPONENTS:
+            app_name = f"airflow-{component}-mock"
+            config = _core_charm_config(juju, component)
+            assert "[metrics]" in config
+            assert "[traces]" in config
+            assert "otel_on = True" in config
+            assert f"otel_host = {expected_otel_host}" in config
+            assert "otel_port = 4318" in config
+            assert f"otel_service = {app_name}" in config
+            assert "otel_ssl_active = False" in config
+
+            otlp_endpoint = juju.run(f"{app_name}/0", "get-otlp-endpoint").results["otlp-endpoint"]
+            assert otlp_endpoint == expected_otlp_endpoint
+
+        # Verify Airflow's OTel metric exporter initializes from the rendered airflow.cfg
+        # and delivers metric points over HTTP OTLP to the collector.
+        _assert_airflow_metric_reaches_otelcol(juju)
 
         logger.info("Removing send-otlp integration")
         juju.remove_relation(
@@ -859,7 +940,160 @@ def test_send_otlp_integration(juju: jubilant.Juju):
 
         status = juju.status()
         assert "send-otlp" not in status.apps["airflow-coordinator-k8s"].relations
+
+        # Verify [metrics] and [traces] are removed and otlp_endpoint is cleared on all core charms
+        _wait_for_core_configs(juju, lambda c: "[metrics]" not in c and "[traces]" not in c)
+        for component in AIRFLOW_COMPONENTS:
+            component_config = _core_charm_config(juju, component)
+            assert "[metrics]" not in component_config
+            assert "[traces]" not in component_config
+            otlp_endpoint = juju.run(f"airflow-{component}-mock/0", "get-otlp-endpoint").results[
+                "otlp-endpoint"
+            ]
+            assert otlp_endpoint == ""
+    except Exception:
+        logger.info("Removing opentelemetry-collector-k8s after send-otlp failure")
+        juju.remove_application("otelcol", force=True)
+        raise
+
+
+def test_grafana_dashboards_integration(juju: jubilant.Juju):
+    """Verify grafana-dashboards integration, dashboard structure, removal, and re-integration."""
+    # Reuse otelcol deployed in test_send_otlp_integration when running the full suite,
+    # or deploy it on demand when running this test standalone.
+    status = juju.status()
+    if "otelcol" not in status.apps:
+        logger.info("Deploying opentelemetry-collector-k8s")
+        juju.deploy(
+            "opentelemetry-collector-k8s",
+            app="otelcol",
+            channel="0.130/stable",
+            trust=True,
+        )
+
+    try:
+        logger.info(
+            "Integrating coordinator:grafana-dashboards <-> otelcol:grafana-dashboards-consumer"
+        )
+        juju.integrate(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(
+                    status,
+                    "airflow-coordinator-k8s",
+                    *[f"airflow-{c}-mock" for c in AIRFLOW_COMPONENTS],
+                )
+                and jubilant.all_agents_idle(status)
+            ),
+            error=jubilant.any_error,
+            successes=3,
+            delay=5,
+        )
+
+        status = juju.status()
+        assert "grafana-dashboards" in status.apps["airflow-coordinator-k8s"].relations
+
+        otelcol_dashboards_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "otelcol/0",
+                "--endpoint",
+                "grafana-dashboards-consumer",
+                "--format",
+                "json",
+            )
+        )
+        otelcol_dashboards_relations = [
+            rel
+            for rel in otelcol_dashboards_info["otelcol/0"]["relation-info"]
+            if rel.get("endpoint") == "grafana-dashboards-consumer"
+            and rel.get("related-endpoint") == "grafana-dashboards"
+        ]
+        assert len(otelcol_dashboards_relations) == 1
+        otelcol_dashboards_app_data = otelcol_dashboards_relations[0]["application-data"]
+        assert "dashboards" in otelcol_dashboards_app_data
+        dashboards_payload = json.loads(otelcol_dashboards_app_data["dashboards"])
+        assert "file:apache-airflow-overview" in dashboards_payload["templates"]
+        template_entry = dashboards_payload["templates"]["file:apache-airflow-overview"]
+        assert template_entry["charm"] == "airflow-coordinator-k8s"
+        decompressed_dashboard = json.loads(cosl.LZMABase64.decompress(template_entry["content"]))
+        assert decompressed_dashboard["title"] == "Apache Airflow overview"
+        assert decompressed_dashboard["panels"]
+
+        logger.info("Removing grafana-dashboards integration")
+        juju.remove_relation(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
+
+        logger.info(
+            "Re-integrating coordinator:grafana-dashboards <-> otelcol:grafana-dashboards-consumer"
+        )
+        juju.integrate(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+            successes=3,
+            delay=5,
+        )
+
+        reintegrated_info = json.loads(
+            juju.cli(
+                "show-unit",
+                "otelcol/0",
+                "--endpoint",
+                "grafana-dashboards-consumer",
+                "--format",
+                "json",
+            )
+        )
+        reintegrated_relations = [
+            rel
+            for rel in reintegrated_info["otelcol/0"]["relation-info"]
+            if rel.get("endpoint") == "grafana-dashboards-consumer"
+            and rel.get("related-endpoint") == "grafana-dashboards"
+        ]
+        assert len(reintegrated_relations) == 1
+        reintegrated_app_data = reintegrated_relations[0]["application-data"]
+        assert "dashboards" in reintegrated_app_data
+        assert (
+            "file:apache-airflow-overview"
+            in json.loads(reintegrated_app_data["dashboards"])["templates"]
+        )
+
+        juju.remove_relation(
+            "airflow-coordinator-k8s:grafana-dashboards",
+            "otelcol:grafana-dashboards-consumer",
+        )
+        juju.wait(
+            lambda status: (
+                jubilant.all_active(status, "airflow-coordinator-k8s")
+                and jubilant.all_agents_idle(status, "airflow-coordinator-k8s", "otelcol")
+                and "grafana-dashboards" not in status.apps["airflow-coordinator-k8s"].relations
+            ),
+            error=jubilant.any_error,
+        )
     finally:
         logger.info("Removing opentelemetry-collector-k8s")
         juju.remove_application("otelcol", force=True)
-

@@ -723,3 +723,116 @@ def test_layer1_owned_keys_match_the_base_template(context, state, workload_cont
             "scheduler.enable_healthcheck",
         }
     )
+
+
+def test_layer1_telemetry_ownership_moves_with_send_otlp_relation(
+    context, state, mock_command_executor, workload_container
+):
+    """Coordinator owns [metrics]/[traces] while send-otlp is active; provider resumes on removal.
+
+    Verifies three things across a full relation cycle:
+      1. With both relations active, provider [metrics] and [traces] keys collide
+         with the coordinator's telemetry_config and are dropped (unit stays
+         ActiveStatus with the non-blocking collision notice in _status_messages),
+         while the provider relation databag itself remains untouched.
+      2. During send-otlp relation_broken (when the departing relation is still
+         in state.relations but relation.active is False), the coordinator
+         relinquishes telemetry ownership and the provider's original [metrics]
+         and [traces] settings become active with no status notice.
+      3. When send-otlp is restored, coordinator telemetry once again takes
+         precedence and drops the provider's colliding keys.
+    """
+    secret = _sensitive_secret()
+    provider_template = (
+        "[metrics]\notel_on = True\notel_host = external-collector\n"
+        "[traces]\notel_on = True\notel_host = external-collector\n"
+    )
+    provider_rel = _provider_relation(provider_template, secret.id)
+    original_provider_data = dict(provider_rel.remote_app_data)
+
+    send_otlp_rel = ops.testing.Relation(
+        constants.SEND_OTLP_RELATION_NAME,
+        remote_app_data={
+            "endpoints": json.dumps(
+                [
+                    {
+                        "protocol": "http",
+                        "endpoint": "http://1.2.3.4:4318",
+                        "telemetries": ["logs", "metrics", "traces"],
+                        "insecure": True,
+                    }
+                ]
+            )
+        },
+    )
+
+    # 1. Both send-otlp and provider-configuration active -> coordinator wins.
+    state_both = dataclasses.replace(
+        state,
+        relations=[*state.relations, provider_rel, send_otlp_rel],
+        secrets=[*state.secrets, secret],
+    )
+    with context(context.on.relation_changed(send_otlp_rel), state_both) as manager:
+        state_after_active = manager.run()
+        assert manager.charm._provider_config == {}
+        assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in manager.charm._status_messages
+
+    assert state_after_active.unit_status == ops.ActiveStatus(
+        constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE
+    )
+    assert (
+        state_after_active.get_relation(provider_rel.id).remote_app_data == original_provider_data
+    )
+    for template in _distributed_config_templates(state_after_active):
+        parsed = _parse(template)
+        assert parsed.get("metrics", "otel_host") == "1.2.3.4"
+        assert parsed.get("traces", "otel_host") == "1.2.3.4"
+
+    # 2. send-otlp broken -> departing relation is still in state.relations, but
+    # inactive during the broken hook; provider's [metrics] & [traces] become active.
+    state_for_broken = dataclasses.replace(state_after_active, containers=[workload_container])
+    send_otlp_in_state = state_for_broken.get_relation(send_otlp_rel.id)
+    assert send_otlp_in_state in state_for_broken.relations
+    with context(context.on.relation_broken(send_otlp_in_state), state_for_broken) as manager:
+        state_after_broken = manager.run()
+        assert manager.charm._otlp_endpoint is None
+        assert manager.charm._provider_config == {
+            "metrics": {"otel_on": "True", "otel_host": "external-collector"},
+            "traces": {"otel_on": "True", "otel_host": "external-collector"},
+        }
+        assert manager.charm._status_messages == []
+
+    assert state_after_broken.unit_status == ops.ActiveStatus()
+    assert (
+        state_after_broken.get_relation(provider_rel.id).remote_app_data == original_provider_data
+    )
+    for template in _distributed_config_templates(state_after_broken):
+        parsed = _parse(template)
+        assert parsed.get("metrics", "otel_host") == "external-collector"
+        assert parsed.get("traces", "otel_host") == "external-collector"
+
+    # 3. send-otlp restored -> coordinator re-claims [metrics] & [traces].
+    relations_without_broken_otlp = [
+        r for r in state_after_broken.relations if r.endpoint != constants.SEND_OTLP_RELATION_NAME
+    ]
+    state_restored = dataclasses.replace(
+        state_after_broken,
+        relations=[*relations_without_broken_otlp, send_otlp_rel],
+        containers=[workload_container],
+    )
+    with context(context.on.relation_changed(send_otlp_rel), state_restored) as manager:
+        state_after_restored = manager.run()
+        assert manager.charm._provider_config == {}
+        assert constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE in manager.charm._status_messages
+
+    assert state_after_restored.unit_status == ops.ActiveStatus(
+        constants.DROPPED_COLLIDING_PROVIDER_KEYS_MESSAGE
+    )
+    assert (
+        state_after_restored.get_relation(provider_rel.id).remote_app_data
+        == original_provider_data
+    )
+    for template in _distributed_config_templates(state_after_restored):
+        parsed = _parse(template)
+        assert parsed.get("metrics", "otel_host") == "1.2.3.4"
+        assert parsed.get("traces", "otel_host") == "1.2.3.4"
