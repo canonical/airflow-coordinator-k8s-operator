@@ -6,6 +6,7 @@ output "application" {
 output "provides" {
   value = {
     airflow_coordinator = "airflow-coordinator"
+    grafana_dashboards  = "grafana-dashboards"
   }
 }
 
@@ -16,5 +17,6 @@ output "requires" {
     airflow_kubernetes_executor    = "airflow-kubernetes-executor-config"
     airflow_provider_configuration = "airflow-provider-configuration"
     oauth                          = "oauth"
+    send_otlp                      = "send-otlp"
   }
 }

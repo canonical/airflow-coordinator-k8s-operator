@@ -54,7 +54,5 @@ def emit_admin_action(
 def changed_fields(previous: dict[str, Any], current: dict[str, Any]) -> list[str]:
     """Return sorted field names whose values differ between snapshots."""
     return sorted(
-        key
-        for key in previous.keys() | current.keys()
-        if previous.get(key) != current.get(key)
+        key for key in previous.keys() | current.keys() if previous.get(key) != current.get(key)
     )
