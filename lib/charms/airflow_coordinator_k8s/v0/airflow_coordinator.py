@@ -105,6 +105,7 @@ file contents to the workload container
 pod spec files
 - the coordinator charm updates anything that affects the airflow config and/or
 k8s executor pod spec files
+- the coordinator charm adds, changes, or removes the webserver config template
 - the relation with the coordinator charm is broken
 
 ### Provider Charm
@@ -173,7 +174,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 10
+LIBPATCH = 11
 
 
 logger = logging.getLogger(__name__)
@@ -467,6 +468,7 @@ class AirflowCoordinatorRequirerEventHandler(
             "config-template" in _diff.changed
             or "kubernetes-executor-pod-spec" in _diff.changed
             or "sensitive-data" in _diff.changed
+            or "webserver-config-template" in (_diff.added | _diff.changed | _diff.deleted)
             or "otlp-endpoint" in _diff.added
             or "otlp-endpoint" in _diff.changed
             or "otlp-endpoint" in _diff.deleted
