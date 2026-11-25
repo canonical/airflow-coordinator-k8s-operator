@@ -11,6 +11,7 @@ OAUTH_ENDPOINT_NAME = "oauth"
 AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-config"
 AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME = "airflow-provider-configuration"
 SEND_OTLP_RELATION_NAME = "send-otlp"
+DEFAULT_OTEL_HTTP_PORT = 4318
 
 PEER_RELATION_NAME = "coordinator-peers"
 
@@ -109,6 +110,8 @@ INVALID_CONFIG_MESSAGE = "Invalid value for `{config_name}` config"
 
 AIRFLOW_KEYS_SECRET = "airflow_keys_secret_id"
 AIRFLOW_KEYS_SECRET_LABEL = "airflow-keys-secret"
+APP_ID = "airflow.coordinator"
+SECURITY_AUDIT_STATE = "security_audit_state"
 
 FERNET_KEY_SECRET_CONFIG = "fernet_key_secret"
 FERNET_KEY = "fernet-key"

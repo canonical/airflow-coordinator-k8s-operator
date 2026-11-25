@@ -56,6 +56,10 @@ resources:
 provides:
   airflow-coordinator:
     interface: airflow_coordinator
+  grafana-dashboards:
+    interface: grafana_dashboard
+    limit: 1
+    optional: true
 
 requires:
   postgres:
@@ -98,6 +102,9 @@ config:
       description: |
         URI of secret with fernet key that Airflow should use to encrypt passwords
         and variables before persisting in the metadata database.
+        New revisions of the secret are applied automatically. To rotate the key,
+        set `fernet-key` to `<new_key>,<old_key>`, run `airflow rotate-fernet-key`,
+        then remove the old key.
     core_default_timezone:
       type: string
       default: utc
