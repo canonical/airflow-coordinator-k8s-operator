@@ -22,10 +22,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Upload charm package
-        uses: canonical/charming-actions/upload-charm@2.6.2
+        uses: canonical/charming-actions/upload-charm@2.7.0
         with:
           credentials: ${{ secrets.CHARMHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -43,10 +43,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Upload charm lib
-        uses: canonical/charming-actions/release-libraries@2.6.2
+        uses: canonical/charming-actions/release-libraries@2.7.0
         with:
           credentials: ${{ secrets.CHARMHUB_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
