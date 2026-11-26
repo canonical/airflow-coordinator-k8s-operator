@@ -10,8 +10,8 @@ requires-python = ">=3.12"
 # You should include the dependencies of the code in src/. You should also include the
 # dependencies of any charmlibs that the charm uses (copy the dependencies from PYDEPS).
 dependencies = [
-    "ops>=3,<4",
-    "pydantic>=1.0",
+    "ops>=3.9.0,<4",
+    "pydantic>=2.14.4",
     "Jinja2>=3.1.6",
     "owasp-logger>=0.1.6,<0.2.0",
     "charmlibs-interfaces-otlp>=0.5.0,<1.0.0",
