@@ -133,7 +133,7 @@ class WebserverConfigGenerator:
                 # charms render it with the actual secret from sensitive_data.
                 webserver_config__client_secret="{{ webserver_config__client_secret }}",
                 api_base_url=api_base_url,
-                scope=provider_info.scope,
+                scope=constants.OAUTH_SCOPE,
                 token_endpoint=provider_info.token_endpoint,
                 authorization_endpoint=provider_info.authorization_endpoint,
                 jwks_endpoint=provider_info.jwks_endpoint,
