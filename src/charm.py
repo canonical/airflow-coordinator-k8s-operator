@@ -21,6 +21,7 @@ import charms.git_integrator.v0.git as git
 import charms.grafana_k8s.v0.grafana_dashboard as grafana_dashboard
 import charms.hydra.v0.oauth as oauth
 import charms.spark_integration_hub_k8s.v0.spark_service_account as spark_service_account
+import cosl
 import mergedeep
 import object_storage
 import ops
@@ -188,11 +189,17 @@ class AirflowCoordinatorK8SOperatorCharm(ops.CharmBase):
             skip_creation=False,
         )
 
+        rules = (
+            otlp.RuleStore(cosl.JujuTopology.from_charm(self))
+            .add_promql_path(constants.PROMETHEUS_ALERT_RULES_PATH)
+            .add_logql_path(constants.LOKI_ALERT_RULES_PATH)
+        )
         self._otlp_requirer = otlp.OtlpRequirer(
             self,
             relation_name=constants.SEND_OTLP_RELATION_NAME,
             protocols=["http"],
             telemetries=["logs", "metrics", "traces"],
+            rules=rules,
         )
 
         self._grafana_dashboards = grafana_dashboard.GrafanaDashboardProvider(

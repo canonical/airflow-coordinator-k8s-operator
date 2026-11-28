@@ -879,6 +879,41 @@ def test_send_otlp_integration(juju: jubilant.Juju):
         otelcol_app_data = otelcol_unit_info["otelcol/0"]["relation-info"][0]["application-data"]
         assert "metadata" in otelcol_app_data
         assert "rules" in otelcol_app_data
+        decompressed_rules = json.loads(cosl.LZMABase64.decompress(otelcol_app_data["rules"]))
+        promql_rules_by_name = {
+            rule["alert"]: rule
+            for group in decompressed_rules["promql"]["groups"]
+            for rule in group["rules"]
+        }
+        expected_promql_alerts = {
+            "ApacheAirflowStarvingPoolTasks",
+            "ApacheAirflowDAGScheduleDelayCritical",
+            "AirflowTaskFailures",
+            "AirflowSchedulerUnhealthy",
+            "AirflowDAGProcessorUnhealthy",
+            "AirflowTriggererUnhealthy",
+        }
+        assert expected_promql_alerts.issubset(promql_rules_by_name)
+        for alert_name in expected_promql_alerts:
+            rule = promql_rules_by_name[alert_name]
+            assert rule["labels"]["severity"] == "critical"
+            assert rule["labels"]["juju_model"] == juju.model
+            assert rule["labels"]["juju_application"] == "airflow-coordinator-k8s"
+            assert "target_info{" in rule["expr"]
+            assert 'juju_application=~".+"' in rule["expr"]
+
+        logql_rules_by_name = {
+            rule["alert"]: rule
+            for group in decompressed_rules["logql"]["groups"]
+            for rule in group["rules"]
+        }
+        assert "HighErrorLogRate" in logql_rules_by_name
+        loki_rule = logql_rules_by_name["HighErrorLogRate"]
+        assert loki_rule["labels"]["severity"] == "critical"
+        assert loki_rule["labels"]["juju_model"] == juju.model
+        assert loki_rule["labels"]["juju_application"] == "airflow-coordinator-k8s"
+        assert 'juju_application=~".+"' in loki_rule["expr"]
+        assert '| detected_level="error"' in loki_rule["expr"]
 
         # Verify collector -> coordinator direction (received HTTP OTLP endpoint)
         coordinator_unit_info = json.loads(

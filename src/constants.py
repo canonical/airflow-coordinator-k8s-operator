@@ -12,6 +12,8 @@ AIRFLOW_KUBERNETES_EXECUTOR_CONFIG_RELATION_NAME = "airflow-kubernetes-executor-
 AIRFLOW_PROVIDER_CONFIGURATION_RELATION_NAME = "airflow-provider-configuration"
 SEND_OTLP_RELATION_NAME = "send-otlp"
 GRAFANA_DASHBOARDS_RELATION_NAME = "grafana-dashboards"
+PROMETHEUS_ALERT_RULES_PATH = "src/alert_rules/prometheus"
+LOKI_ALERT_RULES_PATH = "src/alert_rules/loki"
 DEFAULT_OTEL_HTTP_PORT = 4318
 
 PEER_RELATION_NAME = "coordinator-peers"
